@@ -960,7 +960,8 @@ fn wait_for_new_firmware(
     timeout: Duration,
     mut progress: impl FnMut(&str),
 ) -> Result<String> {
-    let deadline = std::time::Instant::now() + timeout;
+    let started = std::time::Instant::now();
+    let deadline = started + timeout;
     let mut last = String::new();
     loop {
         std::thread::sleep(Duration::from_secs(10));
@@ -970,8 +971,14 @@ fn wait_for_new_firmware(
             .ok()
             .and_then(|c| c.system_status().ok())
             .map(|s| (s.firmware, s.plc));
+        let stuck = started.elapsed() > STUCK_AFTER;
         let line = match &state {
             None => "Miniserver offline (rebooting)…".to_string(),
+            Some((v, _)) if v == before && stuck => format!(
+                "Still on {v} after {} minutes. The Miniserver may have ignored the request: \
+                 stop with Ctrl+C and run `lox update install --yes` again.",
+                STUCK_AFTER.as_secs() / 60
+            ),
             Some((v, _)) if v == before => format!("Still on {v}, downloading…"),
             Some((v, plc)) => format!("Firmware {v}, program {plc:?}…"),
         };
@@ -994,6 +1001,12 @@ fn wait_for_new_firmware(
         }
     }
 }
+
+/// How long the old firmware may keep answering before the wait says the
+/// request was probably ignored. A request on the house Miniserver
+/// (17.2.8.28 → 17.3.11.12) did nothing for 21 minutes; the next one
+/// downloaded, installed and rebooted in 4.
+const STUCK_AFTER: Duration = Duration::from_secs(10 * 60);
 
 /// Compares dotted versions numerically (`17.3.11.12` > `17.2.8.28`).
 fn version_key(v: &str) -> Vec<u32> {
