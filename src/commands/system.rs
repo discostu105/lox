@@ -790,24 +790,34 @@ fn hw_table(
 pub(crate) enum UpdateCmd {
     /// Check for available firmware updates
     Check,
-    /// Install firmware update (requires --yes to confirm)
+    /// Install the latest firmware release and wait until it runs (requires --yes)
     Install {
         /// Skip confirmation prompt
         #[arg(long, short = 'y')]
         yes: bool,
+        /// Return right after starting the update instead of waiting for the new version
+        #[arg(long)]
+        no_wait: bool,
+        /// Minutes to wait for the new version [default: 30]
+        #[arg(long, default_value_t = 30, value_name = "MINUTES")]
+        timeout: u64,
     },
 }
+
+/// Loxone's update server. It answers with the release, beta and test
+/// versions on offer for one Miniserver.
+const UPDATE_SERVER: &str = "https://update.loxone.com/updatecheck.xml";
 
 pub fn cmd_update(ctx: &RunContext, action: UpdateCmd) -> Result<()> {
     match action {
         UpdateCmd::Check => {
             let cfg = Config::load()?;
-            let version = cfg.client()?.get_text("/dev/cfg/version")?;
-            let ver = xml_attr(&version, "value").unwrap_or("?");
+            let client = cfg.client()?;
+            let ver = client.value("/dev/cfg/version")?;
             if !ctx.json {
                 println!("Current firmware: {}", ver);
             }
-            if cfg.serial.is_empty() {
+            let Some(serial) = update_serial(&cfg, &client) else {
                 if ctx.json {
                     println!("{}", serde_json::json!({ "current": ver }));
                 }
@@ -815,92 +825,296 @@ pub fn cmd_update(ctx: &RunContext, action: UpdateCmd) -> Result<()> {
                     "Set the serial number for update checks: lox setup set --serial <serial>"
                 );
                 return Ok(());
-            }
-            let url = format!(
-                "https://update.loxone.com/updatecheck.xml?serial={}&version={}",
-                cfg.serial, ver
-            );
+            };
+            let url = format!("{UPDATE_SERVER}?serial={serial}&version={ver}");
             let body = match reqwest::blocking::get(&url).and_then(|r| r.text()) {
                 Ok(body) => body,
                 Err(e) => {
                     if ctx.json {
                         println!("{}", serde_json::json!({ "current": ver }));
                     }
-                    eprintln!("Could not check for updates: {}", e);
+                    eprintln!("Could not check for updates: {:#}", anyhow::Error::from(e));
                     return Ok(());
                 }
             };
-            let check = UpdateCheck::parse(&body, ver);
+            let check = UpdateCheck::parse(&body, &ver);
+            let program = project_config_version();
             if ctx.json {
-                println!("{}", check.json(ver));
+                let mut json = check.json(&ver);
+                if let Some(p) = &program {
+                    json["program_config_version"] = p.as_str().into();
+                }
+                println!("{json}");
             } else {
-                println!("{}", check.text(ver));
+                println!("{}", check.text(&ver));
+                for note in check.notes(&ver, program.as_deref(), today()) {
+                    println!("{note}");
+                }
             }
         }
-        UpdateCmd::Install { yes } => {
+        UpdateCmd::Install {
+            yes,
+            no_wait,
+            timeout,
+        } => {
             if !yes {
                 bail!("Firmware update requires --yes flag. This will reboot your Miniserver!");
             }
-            let lox = Config::load()?.client()?;
+            let cfg = Config::load()?;
+            let lox = cfg.client()?;
             if ctx.dry_run {
                 print_system_dry_run(ctx, "firmware update", "/jdev/sys/updatetolatestrelease");
                 return Ok(());
             }
+            let before = lox.value("/dev/cfg/version")?;
             let val = lox.update_firmware()?;
-            println!(
-                "Update triggered: {}",
-                if val.is_empty() { "ok" } else { &val }
-            );
-            println!("The Miniserver will reboot during the update process.");
+            if !ctx.json {
+                println!(
+                    "Update started on firmware {before}: {}",
+                    if val.is_empty() { "ok" } else { &val }
+                );
+            }
+            if no_wait {
+                if ctx.json {
+                    println!("{}", serde_json::json!({ "from": before, "started": true }));
+                } else {
+                    println!("The Miniserver downloads the firmware, then reboots.");
+                }
+                return Ok(());
+            }
+            let started = std::time::Instant::now();
+            let after =
+                wait_for_new_firmware(&cfg, &before, Duration::from_secs(timeout * 60), |s| {
+                    if !ctx.json {
+                        println!("{s}");
+                    }
+                })?;
+            let minutes = started.elapsed().as_secs() / 60;
+            if ctx.json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "from": before, "to": after, "minutes": minutes })
+                );
+            } else {
+                println!("✓ Firmware {before} → {after} ({minutes} min). The program is running.");
+                if let Some(note) = program_note(&after, project_config_version().as_deref()) {
+                    println!("{note}");
+                }
+            }
         }
     }
     Ok(())
 }
 
+/// The serial for the update server: `lox setup`, else the project's
+/// lox.toml, else the Miniserver's MAC (its serial).
+fn update_serial(cfg: &Config, client: &loxone_client::LoxClient) -> Option<String> {
+    if !cfg.serial.is_empty() {
+        return Some(cfg.serial.clone());
+    }
+    if let Some(s) = project().and_then(|p| p.serial) {
+        return Some(s);
+    }
+    let mac = client.value("/dev/cfg/mac").ok()?;
+    let serial: String = mac.chars().filter(char::is_ascii_hexdigit).collect();
+    (serial.len() == 12).then(|| serial.to_ascii_uppercase())
+}
+
+/// The Lox Logic project in the working directory, if there is one.
+fn project() -> Option<loxone_config::Project> {
+    let cwd = std::env::current_dir().ok()?;
+    loxone_config::Project::load(&loxone_config::Project::find(&cwd)?).ok()
+}
+
+/// The Loxone Config version that saved the project's base, e.g. `17.2.8.28`.
+fn project_config_version() -> Option<String> {
+    let base = project()?.base;
+    let mut head = vec![0u8; 4096];
+    let n = std::io::Read::read(&mut fs::File::open(base).ok()?, &mut head).ok()?;
+    let head = String::from_utf8_lossy(&head[..n]);
+    let raw = xml_attr(&head, "ConfigVersion")?;
+    // 17020828 → 17.2.8.28
+    (raw.len() == 8 && raw.bytes().all(|b| b.is_ascii_digit())).then(|| {
+        (0..4)
+            .map(|i| {
+                raw[i * 2..i * 2 + 2]
+                    .parse::<u32>()
+                    .unwrap_or(0)
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join(".")
+    })
+}
+
+fn today() -> String {
+    chrono::Local::now().format("%Y-%m-%d").to_string()
+}
+
+/// Polls until the Miniserver reports a firmware other than `before` and its
+/// program runs. The Miniserver first downloads the firmware (several
+/// minutes, still answering on the old version), then reboots.
+fn wait_for_new_firmware(
+    cfg: &Config,
+    before: &str,
+    timeout: Duration,
+    mut progress: impl FnMut(&str),
+) -> Result<String> {
+    let started = std::time::Instant::now();
+    let deadline = started + timeout;
+    let mut last = String::new();
+    loop {
+        std::thread::sleep(Duration::from_secs(10));
+        // A fresh client per poll: the reboot drops connections and tokens.
+        let state = cfg
+            .client()
+            .ok()
+            .and_then(|c| c.system_status().ok())
+            .map(|s| (s.firmware, s.plc));
+        let stuck = started.elapsed() > STUCK_AFTER;
+        let line = match &state {
+            None => "Miniserver offline (rebooting)…".to_string(),
+            Some((v, _)) if v == before && stuck => format!(
+                "Still on {v} after {} minutes. The Miniserver may have ignored the request: \
+                 stop with Ctrl+C and run `lox update install --yes` again.",
+                STUCK_AFTER.as_secs() / 60
+            ),
+            Some((v, _)) if v == before => format!("Still on {v}, downloading…"),
+            Some((v, plc)) => format!("Firmware {v}, program {plc:?}…"),
+        };
+        if line != last {
+            progress(&line);
+            last = line;
+        }
+        if let Some((v, plc)) = state
+            && v != before
+            && plc == PlcState::Running
+        {
+            return Ok(v);
+        }
+        if std::time::Instant::now() > deadline {
+            bail!(
+                "The Miniserver still runs {before} after {} minutes. Check `lox log` for an \
+                 update error, or run `lox update install --yes` again.",
+                timeout.as_secs() / 60
+            );
+        }
+    }
+}
+
+/// How long the old firmware may keep answering before the wait says the
+/// request was probably ignored. A request on the house Miniserver
+/// (17.2.8.28 → 17.3.11.12) did nothing for 21 minutes; the next one
+/// downloaded, installed and rebooted in 4.
+const STUCK_AFTER: Duration = Duration::from_secs(10 * 60);
+
+/// Compares dotted versions numerically (`17.3.11.12` > `17.2.8.28`).
+fn version_key(v: &str) -> Vec<u32> {
+    v.split('.').map(|p| p.parse().unwrap_or(0)).collect()
+}
+
+/// Major and minor version, the part Loxone Config and firmware must share.
+fn major_minor(v: &str) -> Vec<u32> {
+    version_key(v).into_iter().take(2).collect()
+}
+
+/// What to do about the project's program files when they were saved by a
+/// Loxone Config that does not match `firmware`.
+fn program_note(firmware: &str, program: Option<&str>) -> Option<String> {
+    let program = program?;
+    (major_minor(program) != major_minor(firmware)).then(|| {
+        format!(
+            "⚠ This project's base was saved by Loxone Config {program}. For firmware {firmware}: \
+             install the matching Loxone Config, load the program from the Miniserver, save it, \
+             then download a new base."
+        )
+    })
+}
+
 /// The answer of Loxone's update server for one Miniserver.
 #[derive(Debug, PartialEq)]
 struct UpdateCheck {
-    /// The firmware version on offer, when the answer names one.
+    /// The release version on offer.
     available: Option<String>,
     update_available: bool,
+    /// The Loxone Config installer for that version.
+    config_download: Option<String>,
+    /// Remote Connect stops working below this version after `deadline`.
+    remote_connect: Option<(String, String)>,
 }
 
 impl UpdateCheck {
     fn parse(body: &str, current: &str) -> Self {
-        let available = xml_attr(body, "Firmware")
-            .or_else(|| xml_attr(body, "version"))
-            .or_else(|| xml_attr(body, "Version").filter(|v| v.contains('.')));
-        let flagged = xml_attr(body, "Version")
-            .or_else(|| xml_attr(body, "update"))
-            .is_some_and(|v| v != "0" && v != current);
+        let available = element_attr(body, "Release", "Version");
+        let config_download = element_attr(body, "Release", "Path").map(str::to_string);
+        let remote_connect = element_attr(body, "RemoteConnect", "MinVersion")
+            .zip(element_attr(body, "RemoteConnect", "Deadline"))
+            .map(|(v, d)| (v.to_string(), d.to_string()));
         UpdateCheck {
-            update_available: flagged || available.is_some_and(|v| v != current),
+            update_available: available.is_some_and(|v| version_key(v) > version_key(current)),
             available: available.map(str::to_string),
+            config_download,
+            remote_connect,
         }
     }
 
     fn json(&self, current: &str) -> serde_json::Value {
-        let available = match &self.available {
-            Some(v) => v.as_str(),
-            None if self.update_available => "yes",
-            None => current,
-        };
-        serde_json::json!({
+        let mut json = serde_json::json!({
             "current": current,
-            "available": available,
+            "available": self.available.as_deref().unwrap_or(current),
             "update_available": self.update_available,
-        })
+        });
+        if let Some(url) = &self.config_download {
+            json["config_download"] = url.as_str().into();
+        }
+        if let Some((min, deadline)) = &self.remote_connect {
+            json["remote_connect"] =
+                serde_json::json!({ "min_version": min, "deadline": deadline });
+        }
+        json
     }
 
     fn text(&self, current: &str) -> String {
         match &self.available {
-            Some(v) if v != current => format!("Update available: {}", v),
-            None if self.update_available => {
-                "Update available (check Loxone Config for details)".to_string()
+            Some(v) if self.update_available => format!("Update available: {v}"),
+            Some(v) if version_key(v) < version_key(current) => {
+                format!("✓ Firmware is newer than the release ({v})")
             }
-            _ => "✓ Firmware is up to date".to_string(),
+            Some(_) => "✓ Firmware is up to date".to_string(),
+            None => "Could not read the update server's answer".to_string(),
         }
     }
+
+    /// Hints after the version line: the matching Loxone Config, a Remote
+    /// Connect deadline, and program files saved by another Config version.
+    fn notes(&self, current: &str, program: Option<&str>, today: String) -> Vec<String> {
+        let mut notes = Vec::new();
+        if let (Some(v), true) = (&self.available, self.update_available) {
+            if let Some(url) = &self.config_download {
+                notes.push(format!("Loxone Config {v}: {url}"));
+            }
+            if let Some(note) = program_note(v, program) {
+                notes.push(note);
+            }
+        }
+        if let Some((min, deadline)) = &self.remote_connect
+            && version_key(current) < version_key(min)
+            && today.as_str() <= deadline.as_str()
+        {
+            notes.push(format!(
+                "⚠ Remote Connect needs firmware {min} or newer by {deadline}."
+            ));
+        }
+        notes
+    }
+}
+
+/// `attr` of the first `<element …>` in `xml`.
+fn element_attr<'a>(xml: &'a str, element: &str, attr: &str) -> Option<&'a str> {
+    let open = format!("<{element} ");
+    let start = xml.find(&open)? + 1;
+    let end = xml[start..].find('>')? + start;
+    xml_attr(&xml[start..end], attr)
 }
 
 /// `--dry-run` for a system command: what would be requested.
@@ -1056,31 +1270,83 @@ mod tests {
     use super::*;
     use crate::hardware::{HwEntry, HwStatus, counts};
 
+    /// The update server's answer, shortened (2026-11, signatures cut).
+    const UPDATE_ANSWER: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Miniserversoftware Version="10" certificate="…">
+  <Release Version="17.3.11.12" Path="http://updatefiles.loxone.com/LoxConfig/LoxoneConfigSetup_17031112.zip" crc32="cb99aed6" Filesize="670495691" signature="…"/>
+  <Beta Version="17.4.1.2" Path="http://updatefiles.loxone.com/LoxConfig/LoxoneConfigSetup_17040102.zip" crc32="0" Filesize="1" signature="…"/>
+  <RemoteConnect MinVersion="17.3.11.10" AutoUpdateAvailable="15.0.0.0" Deadline="2026-12-01" Why="https://loxone.com/rc-update"/>
+  <update Name="WebInterface" type="webif">
+    <Release Version="20220803" Path="http://updatefiles.loxone.com/WebInterface/Release/x.zip"/>
+  </update>
+</Miniserversoftware>"#;
+
     #[test]
-    fn update_check_reads_the_offered_version() {
-        let newer = UpdateCheck::parse(r#"<Miniserver Firmware="16.1.2.3"/>"#, "15.3.1.2");
-        assert!(newer.update_available);
-        assert_eq!(newer.text("15.3.1.2"), "Update available: 16.1.2.3");
+    fn update_check_reads_the_release_version() {
+        let check = UpdateCheck::parse(UPDATE_ANSWER, "17.2.8.28");
+        assert_eq!(check.available.as_deref(), Some("17.3.11.12"));
+        assert!(check.update_available);
+        assert_eq!(check.text("17.2.8.28"), "Update available: 17.3.11.12");
         assert_eq!(
-            newer.json("15.3.1.2"),
-            serde_json::json!({"current": "15.3.1.2", "available": "16.1.2.3", "update_available": true})
+            check.json("17.2.8.28"),
+            serde_json::json!({
+                "current": "17.2.8.28",
+                "available": "17.3.11.12",
+                "update_available": true,
+                "config_download": "http://updatefiles.loxone.com/LoxConfig/LoxoneConfigSetup_17031112.zip",
+                "remote_connect": {"min_version": "17.3.11.10", "deadline": "2026-12-01"},
+            })
         );
+    }
 
-        let same = UpdateCheck::parse(r#"<Miniserver Firmware="15.3.1.2"/>"#, "15.3.1.2");
+    #[test]
+    fn update_check_compares_versions_numerically() {
+        let same = UpdateCheck::parse(UPDATE_ANSWER, "17.3.11.12");
         assert!(!same.update_available);
-        assert_eq!(same.text("15.3.1.2"), "✓ Firmware is up to date");
+        assert_eq!(same.text("17.3.11.12"), "✓ Firmware is up to date");
 
-        let flag_only = UpdateCheck::parse(r#"<Miniserver update="1"/>"#, "15.3.1.2");
-        assert_eq!(flag_only.available, None);
+        // 17.10 is newer than 17.3, though "17.10" < "17.3" as text.
+        let newer = UpdateCheck::parse(UPDATE_ANSWER, "17.10.1.1");
+        assert!(!newer.update_available);
         assert_eq!(
-            flag_only.text("15.3.1.2"),
-            "Update available (check Loxone Config for details)"
+            newer.text("17.10.1.1"),
+            "✓ Firmware is newer than the release (17.3.11.12)"
         );
-        assert_eq!(flag_only.json("15.3.1.2")["available"], "yes");
 
-        let nothing = UpdateCheck::parse("<html/>", "15.3.1.2");
+        let nothing = UpdateCheck::parse("<html/>", "17.2.8.28");
         assert!(!nothing.update_available);
-        assert_eq!(nothing.json("15.3.1.2")["available"], "15.3.1.2");
+        assert_eq!(nothing.json("17.2.8.28")["available"], "17.2.8.28");
+    }
+
+    #[test]
+    fn update_check_notes_config_remote_connect_and_program_version() {
+        let check = UpdateCheck::parse(UPDATE_ANSWER, "17.2.8.28");
+        let notes = check.notes("17.2.8.28", Some("17.2.8.28"), "2026-11-14".into());
+        assert_eq!(notes.len(), 3, "{notes:?}");
+        assert!(notes[0].starts_with("Loxone Config 17.3.11.12: http"));
+        assert!(notes[1].contains("saved by Loxone Config 17.2.8.28"));
+        assert_eq!(
+            notes[2],
+            "⚠ Remote Connect needs firmware 17.3.11.10 or newer by 2026-12-01."
+        );
+
+        // Same major.minor: no program note. Past the deadline: no warning.
+        let notes = check.notes("17.2.8.28", Some("17.3.1.1"), "2026-12-02".into());
+        assert_eq!(notes.len(), 1, "{notes:?}");
+
+        let current = UpdateCheck::parse(UPDATE_ANSWER, "17.3.11.12");
+        assert!(
+            current
+                .notes("17.3.11.12", Some("17.2.8.28"), "2026-11-14".into())
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn program_note_only_on_a_major_minor_change() {
+        assert!(program_note("17.3.11.12", Some("17.3.1.1")).is_none());
+        assert!(program_note("17.3.11.12", None).is_none());
+        assert!(program_note("17.3.11.12", Some("17.2.8.28")).is_some());
     }
 
     fn entry(status: HwStatus, name: &str, serial: Option<&str>, program: Option<&str>) -> HwEntry {
