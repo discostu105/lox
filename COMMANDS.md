@@ -1179,9 +1179,24 @@ contexts:
 
 ```bash
 lox update check                       # check for updates
-lox update install --yes               # install update
+lox update install --yes               # install the latest release, wait until it runs
+lox update install --yes --no-wait     # start the update and return
 lox reboot --yes                       # reboot Miniserver (refuses without --yes)
 ```
+
+`lox update check` reads the serial from `lox setup`, then from the project's `lox.toml`, then from the
+Miniserver's MAC address. When an update is available, it also prints:
+
+- the download of the matching Loxone Config;
+- a Remote Connect deadline, when Loxone announced one for your firmware;
+- a warning when the project's base was saved by another Loxone Config major.minor version.
+
+Loxone Config can only open and save a program for a firmware of the same major.minor version. Before a
+major.minor update, install the matching Loxone Config. After it, load the program from the Miniserver, save
+it, and download a new base.
+
+`lox update install` waits for the new firmware (default 30 minutes, `--timeout`). The Miniserver downloads
+the firmware for several minutes first, then reboots.
 
 ---
 
