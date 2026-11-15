@@ -716,7 +716,7 @@ follows `page`.
 - `extern … (device: "<serial>")` is something else: an extern matched
   by the serial of a physical device.
 
-### Hardware — Tree and Air devices and what hangs below them
+### Hardware — devices and what hangs below them
 
 ```text
 taster = TreeDevice("Taster Bad", serial: "B0A1B2C3", Installation: "Neben der Tür")
@@ -725,6 +725,10 @@ temp = TreeAsensor("Raum", device: taster, iname: "AI0", Unit: "<v.1> °C", MinT
 led = TreeActor("Status", device: taster, iname: "Q0", In: klingel.Q)
 tree = LoxTree("Tree", serial: "13000003", SwitchBoard: "Verteiler 2")
 klingel.room = "Flur"
+relais = LoxREL("Relay Extension 1", serial: "0BDDC807")
+rollo = Actor("Rollo auf", device: relais, iname: "Q1", I: taster_auf.Q)
+extern haus = LoxLIVE(uuid: "15ea0aa5-0148-3cbb-ffffed57184a04d2")
+tuer = Actor("Türöffner", device: haus, uuid: "15ea0aa7-0196-3de8-ffffed57184a04d2")
 ```
 
 A hardware declaration takes over a device that Loxone Config paired, or
@@ -732,15 +736,25 @@ an input or output below one. The element stays where it is; the source
 owns its title (the label), its room and category, and the settings it
 states. They are written on every compile.
 
-- **Devices:** `TreeDevice`, `LoxAIRDevice`, and the extensions `LoxTree`
-  and `LoxAIR`. A device is matched by `serial:` (an Air device's is
-  the one `/data/status` lists, from its `IP=`) or by `uuid:`.
-- **Inputs and outputs:** `TreeSensor`, `TreeAsensor`, `TreeActor` and
-  `TreeAactor` below a `TreeDevice`; `LoxAIRsensor`, `LoxAIRAsensor`,
-  `LoxAIRactor` and `LoxAIRAactor` below a `LoxAIRDevice`. `device:`
+- **Devices:** `TreeDevice`, `LoxAIRDevice`, the extensions `LoxTree`,
+  `LoxAIR`, `LoxREL` (Relay Extension) and `LoxDigin` (DI Extension), and
+  a `NetworkDevice` such as an Intercom. A device is matched by `serial:`
+  (an Air device's is the one `/data/status` lists, from its `IP=`) or
+  by `uuid:`.
+- **Inputs and outputs:** `TreeSensor`, `TreeAsensor`, `TreeActor`,
+  `TreeAactor` and `ApiActor` below a `TreeDevice`; `LoxAIRsensor`,
+  `LoxAIRAsensor`, `LoxAIRactor`, `LoxAIRAactor`, `OvertempShutdown`
+  and `ApiActor` below a `LoxAIRDevice`; `Actor` and `OvertempShutdown`
+  below a `LoxREL`; `DigitalIn` below a `LoxDigin`; `DigitalIn`,
+  `OvertempShutdown` and `ApiActor` below a `NetworkDevice`. `device:`
   names the device's declaration. The I/O is matched by `iname:` inside
   that device, which needs the device matched by `serial:`, or by
   `uuid:`.
+- **The Miniserver's own I/O:** `Actor`, `DigitalIn` and
+  `OvertempShutdown`. The Miniserver stays an extern (its settings are
+  claims, see *The project and the Miniserver — the house's own settings*), and `device:` names that
+  extern. Its I/O is matched by `uuid:` only: the extensions and network
+  devices below it reuse its designations (`Q1`, `I1`, `TSD`).
 - **Settings** are those of `=` on a setting (below), with the same
   rules for adding one. The extensions have `Installation`,
   `SwitchBoard`, `SwitchBoardRow` and `SwitchBoardPos`, rewritten only.
@@ -763,8 +777,11 @@ states. They are written on every compile.
   with the values the config holds. An extern among them keeps its
   slug, and its statements move into its declaration: several `<-`
   onto one port become a list. A `.tiles`, `.room` or `.category` claim
-  stays as it is. Adopting an I/O alone is an error. Pairing a device
-  stays in Loxone Config.
+  stays as it is. Pairing a device stays in Loxone Config.
+- `adopt --uuid <I/O>` declares an input or output alone when its device
+  is declared already, or when it sits on the Miniserver and the
+  Miniserver is an extern of the module. Otherwise the refusal names the
+  device to adopt first.
 - A `defaults` statement the adopt writes covers only types the module
   declares nowhere yet, so adopting devices one at a time never puts a
   `defaults` in front of declarations written without one.

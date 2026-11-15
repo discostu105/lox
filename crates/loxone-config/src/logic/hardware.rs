@@ -6,10 +6,12 @@
 //! attributes the source owns. Nothing below the expansion knows the
 //! declaration form.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{Error, Result};
-use crate::hardware::{STATISTICS, is_device, is_hardware, is_io, parents, stats_value};
+use crate::hardware::{
+    MINISERVER, STATISTICS, is_device, is_hardware, is_io, parents, stats_value,
+};
 use crate::logic::ast::{
     Attr, BindingKind, BlockDecl, ExprWireDecl, ExternDecl, Item, MatchSpec, OwnedDecl, PortRef,
     SetDecl, Value, WireDecl,
@@ -143,6 +145,14 @@ pub(super) fn lower(items: &mut Vec<Item>) -> Result<()> {
     if hw.is_empty() {
         return Ok(());
     }
+    // The Miniserver's externs: its onboard I/O names one as its device.
+    let miniservers: BTreeSet<String> = items
+        .iter()
+        .filter_map(|i| match i {
+            Item::Extern(e) if e.block_type == MINISERVER.0 => Some(e.slug.clone()),
+            _ => None,
+        })
+        .collect();
     // What a declaration states in its argument list is written there
     // only: one spelling per fact.
     let mut rooms: BTreeMap<String, (Option<Value>, Option<Value>)> = BTreeMap::new();
@@ -183,7 +193,7 @@ pub(super) fn lower(items: &mut Vec<Item>) -> Result<()> {
         match item {
             Item::Block(b) if is_hardware(&b.block_type) => {
                 let (room, category) = rooms.remove(&b.slug).unwrap_or_default();
-                out.extend(lower_one(b, &hw, room, category)?);
+                out.extend(lower_one(b, &hw, &miniservers, room, category)?);
             }
             Item::Attr(a) if hw.contains_key(&a.slug) => {}
             other => out.push(other),
@@ -252,6 +262,7 @@ fn plugin_spec(b: &BlockDecl, gid: &str) -> Result<MatchSpec> {
 fn lower_one(
     b: BlockDecl,
     hw: &BTreeMap<String, (String, Identity)>,
+    miniservers: &BTreeSet<String>,
     room: Option<Value>,
     category: Option<Value>,
 ) -> Result<Vec<Item>> {
@@ -297,6 +308,27 @@ fn lower_one(
             ));
         };
         let parent = match hw.get(dev) {
+            // The Miniserver: by `uuid:` alone, as an extension below it
+            // repeats its designations.
+            None if miniservers.contains(dev) && parents(ty).contains(&MINISERVER.0) => {
+                return match (&id.iname, &id.uuid) {
+                    (None, Some(u)) => {
+                        lower_rest(b, MatchSpec::Uuid(u.clone()), None, id, room, category)
+                    }
+                    _ => fail(format!(
+                        "`{}`: say which {ty} of the Miniserver `{dev}` this is with `uuid: \"…\"`. \
+                         Its extensions repeat its designations, so `iname:` cannot tell them apart.",
+                        b.slug
+                    )),
+                };
+            }
+            None if miniservers.contains(dev) => {
+                return fail(format!(
+                    "`{}`: a {ty} hangs below a {}, not the Miniserver (`{dev}`).",
+                    b.slug,
+                    parents(ty).join(" or ")
+                ));
+            }
             Some((t, pid)) if parents(ty).contains(&t.as_str()) => pid,
             Some((t, _)) => {
                 return fail(format!(
@@ -341,6 +373,21 @@ fn lower_one(
             }
         }
     };
+    lower_rest(b, match_spec, device_serial, id, room, category)
+}
+
+/// The extern, statements and [`OwnedDecl`] of a declaration whose matcher
+/// is settled.
+fn lower_rest(
+    b: BlockDecl,
+    match_spec: MatchSpec,
+    device_serial: Option<String>,
+    id: &Identity,
+    room: Option<Value>,
+    category: Option<Value>,
+) -> Result<Vec<Item>> {
+    let fail = |m: String| Err(Error::Compile(m));
+    let ty = b.block_type.as_str();
     let mut items = vec![Item::Extern(ExternDecl {
         slug: b.slug.clone(),
         block_type: b.block_type.clone(),
