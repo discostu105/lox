@@ -137,6 +137,9 @@ GET /jdev/sys/checktoken, refreshtoken, killtoken                  → token man
 GET /jdev/sys/reboot                → reboot Miniserver
 GET /jdev/sps/restart, /jdev/sps/state → restart the program (loads sps_new.zip), PLC state (5 = running)
 GET /jdev/sys/updatetolatestrelease → firmware update
+GET /jdev/sps/livelearn/listtree/techs/{-1|ms/tech[/devs]} → device search: technologies, bases, paired devices
+GET /jdev/sps/livelearn/search/{base}/{id}, keepalive, results, stop → device search (keepalive every 10 s)
+GET /jdev/sps/livelearn/identify/{base}/{serial|0}, identifystop    → let a device flash
 WSS /ws/rfc6455                     → WebSocket: token auth key exchange, state streaming
 FTP /prog, /sys/custom              → config download and upload, custom changes
 UDP :7070                           → Miniserver discovery (broadcast)

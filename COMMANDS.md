@@ -807,6 +807,29 @@ Each device gets one status:
 | `offline` | In the program and on the bus, but offline |
 | `ok` | In the program and online |
 
+### Paired devices and device search: `lox hw ls`, `search`, `identify`
+
+```bash
+lox hw ls                             # paired Tree, Air and Link devices: serial, base, room, online
+lox hw ls --tech air -o json          # one technology; JSON adds uuid, place, switchboard
+lox hw search tree                    # search every Tree base for 60 s each, print what turns up
+lox hw search 0C000A01 --seconds 120  # search one Air base (serial from the BASE column)
+lox hw identify B0123456              # let a device flash for 10 s (--seconds to change)
+```
+
+These use the Miniserver's device search, the one the Loxone App offers in expert mode. The user lox connects
+with needs the rights Device management and Expert mode.
+
+- `hw ls` reads the paired devices per technology (`tree`, `air`, `link`, default `all`). BASE is the Tree base,
+  Air base or `link` a device is paired with. Air bases show up as Tree devices too.
+- `hw search` searches for devices that are not paired yet, and pairs nothing. `tree` or `air` searches each base
+  of that technology one after the other. A device in learn mode shows up as soon as the Miniserver reports it.
+  Only one search runs on the Miniserver at a time, so it ends a search running in the Loxone App.
+- `hw identify` finds the device's base with `hw ls` and makes it flash.
+
+Search and identify always end with their stop command: when the time is up, on an error, and on Ctrl-C. A second
+Ctrl-C quits at once. `--dry-run` shows the commands without sending them.
+
 ---
 
 ## Command Schema (AI Agents)

@@ -686,6 +686,49 @@ pub(crate) enum HwCmd {
         #[command(flatten)]
         src: crate::commands::config_insight::ConfigSource,
     },
+    /// List the paired devices the Miniserver reports
+    ///
+    /// Reads the Miniserver's device search lists (the Loxone App's device
+    /// search). Per device: technology, name, type, serial, the base it is
+    /// paired with (Tree extension, Air base or `link`), room and online state.
+    /// Needs the user rights Device management and Expert mode.
+    ///
+    /// JSON fields: `tech`, `name`, `type`, `serial`, `base`, `ms_serial`,
+    /// `uuid`, `room`, `room_name`, `place`, `switchboard`, `online`.
+    Ls {
+        /// Technology to list
+        #[arg(long, value_enum, default_value = "all")]
+        tech: crate::commands::hw::Tech,
+    },
+    /// Search for devices to pair on a Tree extension or an Air base
+    ///
+    /// `tree` or `air` searches every base of that technology, one after the
+    /// other, each for --seconds. A serial searches one base (`lox hw ls`
+    /// shows them in BASE). Found devices are printed as they appear; nothing
+    /// is paired. The search always ends with a stop command, also on an
+    /// error or Ctrl-C. Only one search runs at a time on the Miniserver: it
+    /// ends a search in the Loxone App and the other way round.
+    ///
+    /// JSON: one entry per base: `base`, `found` (`serial`, `type`, `base`,
+    /// `ms_serial`, `capabilities`), `cancelled`, `warnings`.
+    Search {
+        /// `tree`, `air`, or the serial of a Tree extension or Air base
+        target: String,
+        /// How long to search each base (1 to 600)
+        #[arg(long, default_value_t = 60)]
+        seconds: u64,
+    },
+    /// Make a paired device flash so you can find it
+    ///
+    /// Looks the device up in `lox hw ls` and identifies it on its base.
+    /// Identify always ends after --seconds, also on an error or Ctrl-C.
+    Identify {
+        /// The device's serial, as `lox hw ls` shows it (Air: the MAC)
+        serial: String,
+        /// How long the device flashes (1 to 300)
+        #[arg(long, default_value_t = 10)]
+        seconds: u64,
+    },
 }
 
 pub fn cmd_hw(ctx: &RunContext, action: HwCmd) -> Result<()> {
@@ -715,6 +758,13 @@ pub fn cmd_hw(ctx: &RunContext, action: HwCmd) -> Result<()> {
                     hw_table(&entries, &counts, &snap.label, !ctx.no_header)
                 );
             }
+        }
+        HwCmd::Ls { tech } => crate::commands::hw::cmd_ls(ctx, tech)?,
+        HwCmd::Search { target, seconds } => {
+            crate::commands::hw::cmd_search(ctx, &target, seconds)?
+        }
+        HwCmd::Identify { serial, seconds } => {
+            crate::commands::hw::cmd_identify(ctx, &serial, seconds)?
         }
     }
     Ok(())
