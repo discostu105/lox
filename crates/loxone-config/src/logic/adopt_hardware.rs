@@ -210,6 +210,28 @@ pub(super) fn adopt(
                 args.push(param(name, value_of(&v)));
             }
         }
+        // A plugin's settings: its package's parameters as `<SET>` holds
+        // them, those shown in its properties (all, for a package the
+        // table does not know).
+        if o.block_type == "Plugin"
+            && let Some(set) = crate::plugins::set_of(el)
+        {
+            let kind = el.attr("gid").and_then(crate::plugins::kind);
+            for entry in set.child_elements() {
+                let shown = kind.is_none_or(|k| {
+                    k.params
+                        .iter()
+                        .find(|p| p.id == entry.name)
+                        .is_some_and(|p| p.shown)
+                });
+                let t = entry.attr("t").unwrap_or("11");
+                if shown
+                    && let Some(v) = crate::plugins::decode(t, entry.attr_decoded("v").as_deref())
+                {
+                    args.push(param(&crate::plugins::source_key(&entry.name), v));
+                }
+            }
+        }
         // Statistics the type records with; any other kind stays with
         // Loxone Config.
         if let Some(want) = stats_value(&o.block_type)

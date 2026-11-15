@@ -548,6 +548,7 @@ impl ExternDecl {
             MatchSpec::Within { device, iname } => {
                 vec![ref_arg("device", device), str_arg("iname", iname)]
             }
+            MatchSpec::Plugin { gid } => vec![str_arg("gid", gid)],
         };
         if let Some(r) = &self.room {
             out.push(str_arg("room", r));
@@ -615,6 +616,11 @@ pub enum MatchSpec {
         device: String,
         iname: String,
     },
+    /// A Network Periphery plugin the compiler creates: `gid:` names its
+    /// package. The lockfile keeps the UUID it was given.
+    Plugin {
+        gid: String,
+    },
 }
 
 impl MatchSpec {
@@ -626,7 +632,7 @@ impl MatchSpec {
             MatchSpec::Title(_) => "title",
             MatchSpec::Mirrors(_) => "mirrors",
             MatchSpec::Serial(_) => "serial",
-            MatchSpec::Create { .. } => "created",
+            MatchSpec::Create { .. } | MatchSpec::Plugin { .. } => "created",
         }
     }
 }
@@ -649,6 +655,7 @@ impl fmt::Display for MatchSpec {
             MatchSpec::Within { device, iname } => {
                 write!(f, "device: {device}, iname: {}", quote(iname))
             }
+            MatchSpec::Plugin { gid } => write!(f, "gid: {}", quote(gid)),
         }
     }
 }

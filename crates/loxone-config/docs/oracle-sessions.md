@@ -1233,6 +1233,21 @@ the 24 hour format, elevation, time server and currency. The facts are in
 - The first 17.3 save also raises `LoxLIVE` to `V="179"`, adds `SwBU=` to it and `WF="16384"` to the
   project. That is the save fingerprint of 17.3, not one of the settings.
 
+## Plugins (session 96, D137) — passed
+
+Ran 2026-11-15 with Loxone Config 17.3.11.12 on a private prefix and display, offline. The base was
+`examples/library/access/access.Loxone`. Copy A had an MCP Server and a Matter plugin minted by
+`loxl compile`; copy B had a bare `<C Type="Plugin" gid="Exo"/>`, a Matter with `<SET>` only and a
+tick box written `v="false"`. Each was opened and saved. The facts are in
+[loxone-format.md](loxone-format.md) (*Plugins in the Network Periphery*).
+
+- The minted plugins came back unchanged except `V=` (178 → 179) and the `Desc=`/`NDOC=` a save takes
+  from the package.
+- Compiling the same source against the saved copy is byte-identical to that copy.
+- The bare plugin got every default, an online status, and moved to the *Exosphere* folder. The
+  Matter without an online status got one. `v="false"` was dropped.
+- The first open asked about an automatic backup; answering *No* opened the copy.
+
 ## Block settings (sessions 43 and 44, D95) — passed, four findings
 
 Ran 2026-11-01 with Loxone Config 17.2.8.28 on a private prefix and display, offline. The base was

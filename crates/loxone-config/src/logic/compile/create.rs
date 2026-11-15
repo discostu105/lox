@@ -1,6 +1,7 @@
 //! Tree devices the source creates (`kind:`, `tree:`): each is added to
 //! its Tree extension's branch once, unpaired, and the lockfile keeps its
 //! UUID. From then on the declaration matches it like any other device.
+//! Plugins (`gid:`) the same way, into the "Network Periphery" folder.
 //! Hardware leaves the config only by `removed <slug>`.
 
 use super::*;
@@ -27,7 +28,11 @@ fn creating(module: &Module) -> Vec<(&str, &str, &str, Option<&str>)> {
 /// are checked: one taken over by `serial:` or `uuid:` stays as it is,
 /// one under `removed <slug>` becomes a tombstone, any other is refused.
 pub(super) fn retire_created(base: &LoxoneDoc, module: &Module, lock: &mut Lockfile) -> Result<()> {
-    let creating: BTreeSet<&str> = creating(module).into_iter().map(|c| c.0).collect();
+    let creating: BTreeSet<&str> = creating(module)
+        .into_iter()
+        .map(|c| c.0)
+        .chain(creating_plugins(module).into_iter().map(|c| c.0))
+        .collect();
     let removed: BTreeSet<&str> = module.removed().map(|r| r.slug.as_str()).collect();
     for (slug, uuid) in lock.hardware.clone() {
         if creating.contains(slug.as_str()) {
@@ -37,29 +42,135 @@ pub(super) fn retire_created(base: &LoxoneDoc, module: &Module, lock: &mut Lockf
             lock.hardware.remove(&slug);
             continue;
         }
+        let block_type = find_c(&base.xml.root, &uuid)
+            .and_then(|e| e.attr("Type"))
+            .unwrap_or("TreeDevice")
+            .to_string();
+        let what = if block_type == "Plugin" {
+            "plugin"
+        } else {
+            "Tree device"
+        };
         if !removed.contains(slug.as_str()) {
+            let paired = if block_type == "Plugin" {
+                ""
+            } else {
+                " (or by `serial:` once it is paired)"
+            };
             return Err(Error::Compile(format!(
-                "`{slug}` created the Tree device {uuid}, and the source no longer declares it. \
-                 To delete the device, add `removed {slug}`; to keep it, declare it by `uuid: \
-                 \"{uuid}\"` (or by `serial:` once it is paired)."
+                "`{slug}` created the {what} {uuid}, and the source no longer declares it. \
+                 To delete it, add `removed {slug}`; to keep it, declare it by `uuid: \
+                 \"{uuid}\"`{paired}."
             )));
         }
         // Its inputs must not feed a wire Loxone Config drew: the
         // source's wires leave with the declarations.
         if let Some(target) = gui_wired(base, lock, &uuid) {
             return Err(Error::Compile(format!(
-                "`removed {slug}`: the Tree device {uuid} drives {target}. Remove that wire \
+                "`removed {slug}`: the {what} {uuid} drives {target}. Remove that wire \
                  in Loxone Config first."
             )));
         }
         lock.hardware.remove(&slug);
-        lock.removed.insert(
-            uuid,
-            Tombstone {
-                slug,
-                block_type: "TreeDevice".to_string(),
-            },
-        );
+        lock.removed.insert(uuid, Tombstone { slug, block_type });
+    }
+    Ok(())
+}
+
+/// The declarations that create a plugin: slug and package.
+fn creating_plugins(module: &Module) -> Vec<(&str, &str)> {
+    module
+        .externs()
+        .filter_map(|e| match &e.match_spec {
+            MatchSpec::Plugin { gid } => Some((e.slug.as_str(), gid.as_str())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Add each plugin the source creates and the config lacks to the
+/// "Network Periphery" folder, and record its UUID. A package allows so
+/// many plugins per Miniserver: one more is refused, naming the ones the
+/// config holds.
+fn create_plugins(
+    doc: &mut LoxoneDoc,
+    module: &Module,
+    lock: &mut Lockfile,
+    minter: &mut Option<Minter>,
+    opts: &CompileOptions,
+) -> Result<()> {
+    let fail = |m: String| Err(Error::Compile(m));
+    for (slug, gid) in creating_plugins(module) {
+        let k = crate::plugins::kind(gid).expect("lowering checked the package");
+        let locked = lock.hardware.get(slug).cloned();
+        if let Some(el) = locked.as_deref().and_then(|u| find_c(&doc.xml.root, u)) {
+            match el.attr("gid") {
+                Some(g) if g == gid => continue,
+                g => {
+                    return fail(format!(
+                        "`{slug}` is a {} in the config, not a {gid} plugin. A plugin keeps its \
+                         package: add `removed {slug}` and declare the new one under another \
+                         name.",
+                        g.map_or("different object".to_string(), |g| format!("{g} plugin"))
+                    ));
+                }
+            }
+        }
+        let held: Vec<String> = doc
+            .objects()
+            .into_iter()
+            .filter(|o| o.block_type == "Plugin")
+            .filter(|o| {
+                doc.element_at(&o.path)
+                    .is_some_and(|e| e.attr("gid") == Some(gid))
+            })
+            .map(|o| o.uuid)
+            .collect();
+        if let Some(max) = k.max_count
+            && held.len() >= max as usize
+        {
+            return fail(format!(
+                "`{slug}`: the config holds {} {} plugin(s) ({}), and a Miniserver takes at \
+                 most {max}. Declare the one it has with `uuid: \"{}\"` (`loxl adopt --uuid \
+                 {} --as {slug}`) instead of `gid:`.",
+                held.len(),
+                k.name,
+                held.join(", "),
+                held[0],
+                held[0]
+            ));
+        }
+        let folder = doc
+            .objects()
+            .into_iter()
+            .find(|o| {
+                o.block_type == "WeatherCaption"
+                    && doc.element_at(&o.path).is_some_and(|e| {
+                        e.attr("CaptionType") == Some(crate::plugins::FOLDER_CAPTION_TYPE)
+                    })
+            })
+            .map(|o| o.uuid);
+        let Some(folder) = folder else {
+            return fail(format!(
+                "`{slug}`: the config has no \"Network Periphery\" folder to add the plugin to."
+            ));
+        };
+        let title = module
+            .owned()
+            .find(|o| o.slug == slug)
+            .and_then(|o| o.title.clone())
+            .unwrap_or_else(|| k.name.to_string());
+        let folder_el = find_c_mut(&mut doc.xml.root, &folder).expect("found above");
+        let version = folder_el.attr("V").unwrap_or_default().to_string();
+        let m = minter.get_or_insert_with(|| seeded_minter(lock, opts));
+        let mut el = k.element(&title, &version, m, crate::uuid::entity_for_slug(slug));
+        // A base without the plugin gets it back under the UUID it had.
+        if let Some(u) = &locked {
+            el.set_attr("U", u);
+        }
+        let uuid = el.attr("U").expect("the template carries U").to_string();
+        folder_el.push_child(el);
+        lock.hardware.insert(slug.to_string(), uuid);
     }
     Ok(())
 }
@@ -185,6 +296,7 @@ pub(super) fn create_devices(
         caption.push_child(el);
         lock.hardware.insert(slug.to_string(), uuid);
     }
+    create_plugins(doc, module, lock, &mut minter, opts)?;
     if let Some(m) = minter {
         lock.counters.next_mint = m.counter();
     }
