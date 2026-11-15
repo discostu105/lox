@@ -1,6 +1,8 @@
-//! Adopting hardware: a Tree or Air device becomes a declaration, and so
-//! does every input and output below it. An extension (`LoxTree`,
-//! `LoxAIR`) is adopted alone. The declarations own what the config holds
+//! Adopting hardware: a device (Tree, Air, a Relay or DI extension, a
+//! network device) becomes a declaration, and so does every input and
+//! output below it. A Tree or Air extension (`LoxTree`, `LoxAIR`) is
+//! adopted alone, and so is an input or output whose device is declared
+//! already, or that sits on the Miniserver itself. The declarations own what the config holds
 //! now, so the next compile changes nothing. Wires the GUI drew stay with
 //! the GUI; a promoted extern's statements move into its declaration.
 
@@ -8,7 +10,7 @@ use std::collections::BTreeSet;
 
 use crate::doc::{LoxoneDoc, ObjectSummary, element_serial, ports, same_serial};
 use crate::error::{Error, Result};
-use crate::hardware::{STATISTICS, ios, is_device, parents, stats_value};
+use crate::hardware::{MINISERVER, STATISTICS, ios, is_device, parents, stats_value};
 use crate::lock::{LockedExternal, Lockfile, sha256_hex};
 use crate::logic::adopt::{AdoptedBlock, check_promotable};
 use crate::logic::adopt_tree::value_of;
@@ -72,53 +74,96 @@ pub(super) fn adopt(
             o.uuid
         )
     };
-    if !is_device(&root.block_type) {
-        return Err(fail(format!(
-            "cannot adopt {}: an input or output comes with its device. Adopt the {} it sits in.",
-            ident(root),
-            parents(&root.block_type).join(" or ")
-        )));
-    }
     let objects = doc.objects();
-    // The I/Os below the device: those of its types whose nearest device
-    // is this one.
-    let nearest_device = |o: &ObjectSummary| {
+    // The device an object hangs below: the nearest device, or the
+    // Miniserver for its onboard I/O.
+    let nearest_parent = |o: &ObjectSummary| {
         objects
             .iter()
             .filter(|d| {
-                is_device(&d.block_type)
+                (is_device(&d.block_type) || d.block_type == MINISERVER.0)
                     && d.path.len() < o.path.len()
                     && o.path.starts_with(&d.path)
             })
             .max_by_key(|d| d.path.len())
-            .map(|d| d.uuid.clone())
     };
-    let members: Vec<&ObjectSummary> = std::iter::once(root)
-        .chain(objects.iter().filter(|o| {
-            ios(&root.block_type).contains(&o.block_type.as_str())
-                && nearest_device(o).as_deref() == Some(root.uuid.as_str())
-        }))
+    // The device the declarations name, and whether it goes by serial (so
+    // its I/O can go by designation).
+    let (device, members, mut device_slug, serial) = if is_device(&root.block_type) {
+        let members: Vec<&ObjectSummary> = std::iter::once(root)
+            .chain(objects.iter().filter(|o| {
+                ios(&root.block_type).contains(&o.block_type.as_str())
+                    && nearest_parent(o).is_some_and(|d| d.uuid == root.uuid)
+            }))
+            .collect();
+        // By serial when it has a paired one no other device of its type
+        // shares.
+        let root_el = doc.element_at(&root.path).expect("path from objects()");
+        let serial = element_serial(root_el)
+            .map(|s| s.into_owned())
+            .filter(|s| !s.is_empty() && !unpaired(s))
+            .filter(|s| {
+                objects
+                    .iter()
+                    .filter(|o| o.block_type == root.block_type)
+                    .filter_map(|o| {
+                        element_serial(doc.element_at(&o.path)?).map(|x| x.into_owned())
+                    })
+                    .filter(|x| same_serial(x, s))
+                    .count()
+                    == 1
+            });
+        (root, members, String::new(), serial)
+    } else {
+        // An I/O alone: its device is declared already, or is the
+        // Miniserver's extern.
+        let comes_with = |what: &str| {
+            fail(format!(
+                "cannot adopt {}: an input or output comes with its device. {what}",
+                ident(root)
+            ))
+        };
+        let Some(d) = nearest_parent(root)
+            .filter(|d| parents(&root.block_type).contains(&d.block_type.as_str()))
+        else {
+            return Err(comes_with(&format!(
+                "Adopt the {} it sits in.",
+                parents(&root.block_type).join(" or ")
+            )));
+        };
+        let pinned = lock.externals.iter().find(|(_, e)| e.uuid == d.uuid);
+        let (slug, serial) = match pinned {
+            Some((x, e)) if e.owned => (
+                x.clone(),
+                (e.matched_by == "serial")
+                    .then(|| element_serial(doc.element_at(&d.path)?).map(|s| s.into_owned()))
+                    .flatten(),
+            ),
+            Some((x, _)) if d.block_type == MINISERVER.0 => (x.clone(), None),
+            _ if d.block_type == MINISERVER.0 => {
+                return Err(comes_with(&format!(
+                    "Make the Miniserver an extern first: `loxl adopt --uuid {}`.",
+                    d.uuid
+                )));
+            }
+            _ => {
+                return Err(comes_with(&format!(
+                    "Adopt the {} it sits in: `loxl adopt --uuid {}`.",
+                    ident(d),
+                    d.uuid
+                )));
+            }
+        };
+        (d, vec![root], slug, serial)
+    };
+    // The device's I/O of each type, for whether a designation is unique.
+    let siblings: Vec<&ObjectSummary> = objects
+        .iter()
+        .filter(|o| nearest_parent(o).is_some_and(|d| d.uuid == device.uuid))
         .collect();
-
-    // The device: by serial when it has a paired one no other device of
-    // its type shares.
-    let root_el = doc.element_at(&root.path).expect("path from objects()");
-    let serial = element_serial(root_el)
-        .map(|s| s.into_owned())
-        .filter(|s| !s.is_empty() && !unpaired(s))
-        .filter(|s| {
-            objects
-                .iter()
-                .filter(|o| o.block_type == root.block_type)
-                .filter_map(|o| element_serial(doc.element_at(&o.path)?).map(|x| x.into_owned()))
-                .filter(|x| same_serial(x, s))
-                .count()
-                == 1
-        });
 
     let mut items: Vec<Item> = Vec::new();
     let mut promoted: Vec<String> = Vec::new();
-    let mut device_slug = String::new();
     for o in &members {
         let el = doc.element_at(&o.path).expect("path from objects()");
         if lock.objects.values().any(|lo| lo.uuid == o.uuid) {
@@ -168,7 +213,7 @@ pub(super) fn adopt(
         };
         let mut args: Vec<ArgItem> = Vec::new();
         let matched_by;
-        if o.uuid == root.uuid {
+        if o.uuid == device.uuid {
             device_slug = s.clone();
             matched_by = match &serial {
                 Some(x) => {
@@ -186,7 +231,7 @@ pub(super) fn adopt(
             // sibling of its type shares it.
             let iname = o.iname.clone().filter(|i| {
                 serial.is_some()
-                    && members
+                    && siblings
                         .iter()
                         .filter(|m| {
                             m.block_type == o.block_type && m.iname.as_deref() == Some(i.as_str())

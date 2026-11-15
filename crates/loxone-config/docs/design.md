@@ -255,3 +255,4 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D136 | [Rooms and categories from source](decisions/0136-rooms-and-categories.md) | accepted, reverses a non-goal of [vision.md](vision.md) (#324) |
 | D137 | [Plugins in the Network Periphery](decisions/0137-plugins.md) | accepted, extends [D102](decisions/0102-created-tree-devices.md) |
 | D138 | [Hardware declarations carry a fan-in and a tiles claim](decisions/0138-declarations-carry-fan-in-and-tiles.md) | accepted, extends [D101](decisions/0101-hardware-declarations.md) and [D41](decisions/0041-touch-pure-flex-tiles.md) |
+| D139 | [The Miniserver's and its extensions' I/O as hardware declarations](decisions/0139-miniserver-and-extension-io.md) | accepted, extends [D101](decisions/0101-hardware-declarations.md) |
