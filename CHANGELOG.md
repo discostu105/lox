@@ -10,6 +10,11 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.85.0] — 2026-11-15
+
+### Added
+- **Lox Logic: project and Miniserver settings from source.** `extern haus = Document(…)` and `extern ms = LoxLIVE(…)` take settings: location and time zone, time server, currency, the automatic updates (`haus.Updates = "confirm"`, `haus.UpdateTime = 02:00`), the application firewall, password reset, extended login, the LOXONE Log, and where the Miniserver is mounted. Withdrawn, each goes back to what it was.
+
 ## [0.84.0] — 2026-11-14
 
 ### Added
