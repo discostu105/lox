@@ -70,7 +70,7 @@ unicode-segmentation = { version = "1", optional = true }
 libc = { version = "0.2", optional = true }
 
 [dev-dependencies]
-tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
 byteorder = "1"
 # MCP client side for protocol tests of `lox mcp`
 rmcp = { version = "3.5", default-features = false, features = ["client", "server", "macros", "transport-io", "elicitation"] }
