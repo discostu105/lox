@@ -52,7 +52,7 @@ rmcp = { version = "3.5", default-features = false, features = ["server", "macro
 schemars = "1"
 
 # OpenTelemetry deps
-opentelemetry = { version = "0.31", default-features = false, features = ["metrics", "logs", "trace"] }
+opentelemetry = { version = "0.33", default-features = false, features = ["metrics", "logs", "trace"] }
 opentelemetry_sdk = { version = "0.31", default-features = false, features = ["metrics", "logs", "trace", "rt-tokio", "experimental_metrics_periodicreader_with_async_runtime"] }
 opentelemetry-http = { version = "0.31", default-features = false, features = ["reqwest"] }
 opentelemetry-otlp = { version = "0.31", default-features = false, features = ["metrics", "logs", "trace", "http-proto", "reqwest-blocking-client"] }
