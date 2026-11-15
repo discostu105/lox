@@ -579,7 +579,7 @@ async fn open_subscribed(conn: &Connection) -> Result<WsStream> {
         ws = ws_client.connect_raw().await?.0;
         ws_authenticate(&mut ws, conn).await?;
     }
-    ws.send(Message::Text("jdev/sps/enablebinstatusupdate".to_string()))
+    ws.send(Message::text("jdev/sps/enablebinstatusupdate".to_string()))
         .await?;
     Ok(ws)
 }
@@ -609,7 +609,7 @@ where
                 if last_rx.elapsed() > Duration::from_secs(DEAD_SOCKET_SECS) {
                     return Err(Error::Timeout("connection timed out".into()));
                 }
-                ws.send(Message::Text("keepalive".to_string())).await?;
+                ws.send(Message::text("keepalive".to_string())).await?;
                 continue;
             }
             m = ws.next() => m,
@@ -706,7 +706,7 @@ where
                 if last_rx.elapsed() > Duration::from_secs(DEAD_SOCKET_SECS) {
                     return Err(Error::Timeout("connection timed out".into()));
                 }
-                ws.send(Message::Text("keepalive".to_string())).await?;
+                ws.send(Message::text("keepalive".to_string())).await?;
                 continue;
             }
             m = ws.next() => m,
@@ -767,7 +767,7 @@ impl Session {
     }
 
     pub async fn send(&mut self, cmd: &str) -> Result<()> {
-        self.ws.send(Message::Text(cmd.to_string())).await?;
+        self.ws.send(Message::text(cmd.to_string())).await?;
         Ok(())
     }
 
@@ -780,7 +780,7 @@ impl Session {
                     if self.last_rx.elapsed() > Duration::from_secs(DEAD_SOCKET_SECS) {
                         return Err(Error::Timeout("connection timed out".into()));
                     }
-                    self.ws.send(Message::Text("keepalive".to_string())).await?;
+                    self.ws.send(Message::text("keepalive".to_string())).await?;
                     continue;
                 }
                 m = self.ws.next() => m,

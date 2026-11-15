@@ -236,7 +236,7 @@ async fn key_exchange(ws: &mut WsStream, pub_key: &RsaPublicKey) -> Result<()> {
         )
         .map_err(|e| crate::error::err!("RSA encrypt: {}", e))?;
     let encrypted_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &enc);
-    ws.send(Message::Text(format!(
+    ws.send(Message::text(format!(
         "jdev/sys/keyexchange/{}",
         encrypted_b64
     )))
@@ -246,7 +246,7 @@ async fn key_exchange(ws: &mut WsStream, pub_key: &RsaPublicKey) -> Result<()> {
 }
 
 async fn get_user_salt(ws: &mut WsStream, user: &str) -> Result<UserSalt> {
-    ws.send(Message::Text(format!("jdev/sys/getkey2/{}", user)))
+    ws.send(Message::text(format!("jdev/sys/getkey2/{}", user)))
         .await?;
     UserSalt::parse(&ws_read_value(ws, "getkey2").await?)
 }
@@ -266,7 +266,7 @@ async fn request_token(ws: &mut WsStream, conn: &Connection) -> Result<TokenStor
     let salt = get_user_salt(ws, &conn.user).await?;
     let sig = credential_hash(&conn.user, &conn.pass, &salt);
     let client_uuid = uuid::Uuid::new_v4().to_string();
-    ws.send(Message::Text(format!(
+    ws.send(Message::text(format!(
         "jdev/sys/gettoken/{}/{}/{}/{}/{}",
         sig, conn.user, TOKEN_PERMISSION_APP, client_uuid, TOKEN_CLIENT_INFO
     )))
@@ -297,7 +297,7 @@ async fn auth_with_token(
 ) -> Result<Option<TokenStore>> {
     let salt = get_user_salt(ws, &conn.user).await?;
     let hash = token_auth_hash(&ts.token, &salt);
-    ws.send(Message::Text(format!(
+    ws.send(Message::text(format!(
         "authwithtoken/{}/{}",
         hash, conn.user
     )))
