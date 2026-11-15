@@ -53,9 +53,14 @@ schemars = "1"
 
 # OpenTelemetry deps
 opentelemetry = { version = "0.33", default-features = false, features = ["metrics", "logs", "trace"] }
-opentelemetry_sdk = { version = "0.31", default-features = false, features = ["metrics", "logs", "trace", "rt-tokio", "experimental_metrics_periodicreader_with_async_runtime"] }
-opentelemetry-http = { version = "0.31", default-features = false, features = ["reqwest"] }
-opentelemetry-otlp = { version = "0.31", default-features = false, features = ["metrics", "logs", "trace", "http-proto", "reqwest-blocking-client"] }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["metrics", "logs", "trace", "rt-tokio", "experimental_metrics_periodicreader_with_async_runtime"] }
+opentelemetry-http = { version = "0.33", default-features = false, features = ["reqwest"] }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["metrics", "logs", "trace", "http-proto", "reqwest-blocking-client"] }
+# The OTLP exporters' HTTP client (opentelemetry-http 0.33 is built on reqwest 0.13).
+# TLS from rustls with the ring provider the rest of lox uses; without a TLS
+# feature here, exports to an https endpoint would fail at run time.
+reqwest_otlp = { package = "reqwest", version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 # Backup deps
 quick-xml = "0.42"
