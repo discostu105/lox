@@ -922,6 +922,40 @@ property panel instead ([oracle session 70](oracle-sessions.md#units-of-modbus-a
 A Modbus sensor's `MinTime` has no entry and stays a bare number: the panel does not show it on
 either sensor type (nor `MinChange`).
 
+## Project and Miniserver settings
+
+The project's properties live on `<C Type="Document">`, the Miniserver's on `<C Type="LoxLIVE">`. Loxone
+Config 17.3 writes them as follows (oracle session 94):
+
+| Pane field | Attribute | Values |
+|---|---|---|
+| Street, Postcode, City, Country | `Street`, `PostCode`, `Town`, `Ctry` | text |
+| Latitude, Longitude | `Latitude`, `Longitude` | decimal degrees |
+| Elevation | `SL` | meters; absent until set |
+| Time zone, Time server | `Timezone`, `Timeserver` | text; an empty time server is Loxone's |
+| Currency | `Currency` | text |
+| Automatic updates | `AUE`, `AUM` | Automatic: `AUE="true" AUM="1"`. After confirmation: `AUE="true" AUM="2"`. Never: no `AUE`, `AUM="0"` |
+| Update time | `UpdTime` | minutes after midnight (`120` is 02:00); kept when updates are off |
+| Extended login validity | `ExtVal` | `"true"` when ticked, else absent |
+| Application firewall | `FwMode` | On: absent. Off: `"0"` |
+| Disable password reset | `NoPwReset` | `"true"` when ticked, else absent |
+| LOXONE Log | `CrashL` | `"true"` when ticked, else absent |
+| Use 24 hour format | `12hTF` | unticked: `"true"`, ticked: absent |
+| Miniserver: installation, panel, row, position | `Installation`, `SwitchBoard`, `SwitchBoardRow`, `SwitchBoardPos` on `LoxLIVE` | text, numbers |
+
+- A 17.2 save writes no `AUM`. 17.3 reads `AUE="true"` alone as automatic and adds `AUM="1"` on the
+  next save.
+- Choosing *Never* asks first: "Disabling automatic updates also disables Remote Connect and external
+  access." Remote Connect and Cloud DNS have no field of their own.
+- `DeviceTelemetry="true"` is in every 17.x save, but no pane shows it; unticking LOXONE Log keeps it.
+- The Miniserver pane shows the local and external address (`IntAddr`, `ExtAddr`) Loxone Config
+  connects to, and the external HTTP and HTTPS ports read-only. No pane field writes `HoN`.
+- A save writes the project's attributes in this order: `… Latitude Longitude SL Timezone Timeserver
+  Tel EMail Web Logo Cust uuid… FC uuidTime 12hTF dtfmt <units> Currency UpdTime ExtVal AUE AUM
+  DeviceTelemetry CrashL FwMode NoPwReset Geo NumO NumPresets APPKEY APPID`.
+
+Lox Logic writes the settings in the table but `12hTF` ([D135](decisions/0135-project-and-miniserver-settings.md)).
+
 ## Settings of physical inputs and outputs
 
 Inputs and outputs of extensions, Tree and Air devices and 1-Wire sensors carry their settings as attributes:

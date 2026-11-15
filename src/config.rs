@@ -474,18 +474,15 @@ pub fn find_local_lox_dir() -> Option<PathBuf> {
 /// Walk up from the given directory looking for a `.lox/config.yaml` file.
 /// Returns the `.lox/` directory path if found, or None.
 pub fn find_local_lox_dir_from(start: &Path) -> Option<PathBuf> {
-    // Compared resolved: the working directory and HOME can name the same
-    // place differently (a symlink such as macOS's /var -> /private/var).
-    let same = |a: &Path, b: &Path| match (fs::canonicalize(a), fs::canonicalize(b)) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => a == b,
-    };
-    let global_dir = Config::dir();
+    // Compare resolved paths: on macOS the working directory resolves
+    // `/var` to `/private/var`, while `$HOME` may keep the link.
+    let resolved = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let global_dir = resolved(&Config::dir());
     let mut dir = start;
     loop {
         let candidate = dir.join(".lox");
         // Don't match the global ~/.lox/ directory
-        if candidate.join("config.yaml").is_file() && !same(&candidate, &global_dir) {
+        if candidate.join("config.yaml").is_file() && resolved(&candidate) != global_dir {
             return Some(candidate);
         }
         dir = dir.parent()?;

@@ -2629,6 +2629,25 @@ fn parse_ident_statement(
             }));
             Ok(())
         }
+        // slug.Setting = 02:00 — a time of day (the project's update time).
+        [
+            Tok::Ident(ts),
+            Tok::Dot,
+            Tok::Ident(tp),
+            Tok::Eq,
+            clock @ ..,
+        ] if clock_toks(clock).is_some() => {
+            items.push(Item::Set(SetDecl {
+                target: PortRef {
+                    slug: ts.clone(),
+                    port: tp.clone(),
+                },
+                value: clock_value(clock, tp, lineno)?,
+                comment,
+                bulk: None,
+            }));
+            Ok(())
+        }
         [Tok::Ident(ts), Tok::Dot, Tok::Ident(tp), Tok::Eq, val] => {
             items.push(Item::Set(SetDecl {
                 target: PortRef {
