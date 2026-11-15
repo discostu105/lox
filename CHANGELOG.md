@@ -10,6 +10,14 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.88.0] — 2026-11-15
+
+### Added
+- **`lox hw ls`, `lox hw search` and `lox hw identify`** use the Miniserver's device search, as the Loxone App does in expert mode
+  - `hw ls` lists the paired Tree, Air and Link devices with serial, base, room and online state
+  - `hw search tree|air|<base>` shows unpaired devices in learn mode as they turn up, without pairing them
+  - `hw identify <serial>` lets a device flash; search and identify always end, also on Ctrl-C
+
 ## [0.87.0] — 2026-11-15
 
 ### Added
