@@ -1638,6 +1638,7 @@ fn write_setting(doc: &mut LoxoneDoc, owner: &str, name: &str, value: Option<&st
     // A save writes these numbers only when they are not 0.
     let zero = value.is_some_and(crate::connectors::is_zero)
         && crate::connectors::omitted_when_zero(c.attr("Type").unwrap_or(""), name);
+    let block_type = c.attr("Type").unwrap_or("").to_string();
     let el = if name == "Unit" {
         match c.child_elements_mut().find(|e| e.name == "Display") {
             Some(d) => d,
@@ -1656,7 +1657,7 @@ fn write_setting(doc: &mut LoxoneDoc, owner: &str, name: &str, value: Option<&st
         Some(v) if el.attr(name).is_some() => el.set_attr(name, v),
         Some(v) => {
             let names: Vec<&str> = el.attrs.iter().map(|a| a.name.as_str()).collect();
-            let pos = crate::settings::insert_position(&names, name);
+            let pos = crate::settings::insert_position_for(&block_type, &names, name);
             el.attrs.insert(
                 pos,
                 crate::xml::Attr {

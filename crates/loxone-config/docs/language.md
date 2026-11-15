@@ -949,6 +949,49 @@ relais.Installation = "Fenster Ost"
 relais.SwitchBoardPos = 3
 ```
 
+### The project and the Miniserver — the house's own settings
+
+```text
+extern haus = Document(uuid: "15ea0aa3-0372-39b9-ffff504f94112233")
+extern ms = LoxLIVE(uuid: "15ea0aa5-0148-3cbb-ffff504f94112233")
+
+haus.Timezone = "Europe/Vienna"
+haus.Altitude = 384
+haus.Updates = "auto"
+haus.UpdateTime = 02:00
+haus.PasswordReset = off
+ms.SwitchBoard = "Schaltschrank"
+```
+
+The project (`Document`, the root of the config) and the Miniserver (`LoxLIVE`) are externs with
+settings of their own, claimed like a device's: the original is kept in the lock and restored when the
+statement leaves the source
+([D135](decisions/0135-project-and-miniserver-settings.md)).
+
+| Setting | Value | Stored as |
+|---|---|---|
+| `Street`, `Town`, `PostCode`, `Country` | text | `Street=`, `Town=`, `PostCode=`, `Ctry=` |
+| `Latitude`, `Longitude` | decimal degrees | `Latitude=`, `Longitude=` |
+| `Altitude` | meters | `SL=` |
+| `Timezone`, `Timeserver` | text; `""` is Loxone's time server | `Timezone=`, `Timeserver=` |
+| `Currency` | text | `Currency=` |
+| `Updates` | `"auto"`, `"confirm"` (a Miniserver update waits for a confirmation in the app, except a critical security update) or `"never"` | `AUE=`, `AUM=` |
+| `UpdateTime` | a time of day, whole minutes | `UpdTime=`, minutes after midnight |
+| `AppFirewall` | `on`/`off` | `FwMode=` |
+| `PasswordReset` | `on`/`off` | `NoPwReset=` |
+| `ExtendedLogin` | `on`/`off`: extended login validity | `ExtVal=` |
+| `LoxoneLog` | `on`/`off`: crash and diagnostic reports to Loxone | `CrashL=` |
+
+On the Miniserver: `Installation`, `SwitchBoard`, `SwitchBoardRow` and `SwitchBoardPos`, as on the
+extensions. Its name is a `.title` claim.
+
+- **`Updates = "never"` also switches off Remote Connect and Cloud DNS.** Loxone Config asks before
+  it does; the compile does not. Since December 2026, Remote Connect also needs a current version.
+- The text settings are rewritten, never added: every save by Loxone Config 17 writes them. `Altitude`,
+  `Updates` and the switches are added where a save adds them.
+- Anything else on the two objects (the program cycle, the display units, the addresses Loxone Config
+  connects to, the identity) is not a setting, and naming one is an error that lists the settings.
+
 ### `(a, b, …).X = value` — one setting on several objects
 
 ```text
