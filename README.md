@@ -98,6 +98,7 @@ lox energy flow                            # PV, consumption, grid import/export
 lox energy --top 5                         # the meters drawing the most power
 lox health --problems                      # low batteries, weak signal, offline devices
 lox hw status --problems                   # devices missing, offline, replaced or not in the program
+lox hw search air                          # find Air devices in learn mode (pairs nothing)
 lox run abend                              # run a scene
 lox stream --room "Kitchen" -o json        # state changes as they happen
 lox otel serve --endpoint http://…         # push metrics, logs and traces via OTLP

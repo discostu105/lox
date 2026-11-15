@@ -20,6 +20,7 @@ mod energy;
 mod gitops;
 mod hardware;
 mod inventory;
+mod livelearn;
 mod logic;
 mod loxone_xml;
 mod mcp;
@@ -95,7 +96,7 @@ Inspect:
 System:
   status, log, time            Health, logs, clock
   health                       Device health dashboard
-  hw                           Hardware on the bus against the program file
+  hw                           Hardware: paired devices, device search, against the program
   discover, extensions         Find Miniservers, list extensions
   update, reboot               Firmware updates, reboot
   files                        Browse Miniserver filesystem
@@ -557,7 +558,7 @@ pub(crate) enum Cmd {
         #[arg(long)]
         problems: bool,
     },
-    /// Hardware the Miniserver sees against the program file
+    /// Hardware: paired devices, device search, and the program file's hardware
     Hw {
         #[command(subcommand)]
         action: commands::system::HwCmd,
