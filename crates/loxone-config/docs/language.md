@@ -965,8 +965,7 @@ ms.SwitchBoard = "Schaltschrank"
 
 The project (`Document`, the root of the config) and the Miniserver (`LoxLIVE`) are externs with
 settings of their own, claimed like a device's: the original is kept in the lock and restored when the
-statement leaves the source
-([D135](decisions/0135-project-and-miniserver-settings.md)).
+statement leaves the source.
 
 | Setting | Value | Stored as |
 |---|---|---|
