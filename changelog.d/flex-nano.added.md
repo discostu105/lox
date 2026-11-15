@@ -1,1 +1,0 @@
-- **`lox logic adopt --uuid` takes over a Touch Pure Flex and a device whose output is driven from several places.** A declared `TreeDevice` carries its `.tiles` claim, and several `<-` onto one port become a list (`I: [alarm.Silent, brand.PreAlarmSignal]`). Adopting devices one by one no longer writes a `defaults` in front of declarations that have none.

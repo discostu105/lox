@@ -10,6 +10,14 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.86.0] — 2026-11-15
+
+### Added
+- **`loxl adopt --uuid` on the project or the Miniserver** writes their settings into the source as they stand (location, time zone, automatic updates, security switches, where the Miniserver is mounted), so taking them over needs no typing and changes nothing on the next compile.
+- **`lox logic adopt --uuid` takes over a Touch Pure Flex and a device whose output is driven from several places.** A declared `TreeDevice` carries its `.tiles` claim, and several `<-` onto one port become a list (`I: [alarm.Silent, brand.PreAlarmSignal]`). Adopting devices one by one no longer writes a `defaults` in front of declarations that have none.
+- **Lox Logic: plugins from source.** `mcp = Plugin("MCP Server", gid: "McpServer", custom_local_url: "…")` creates the MCP Server or Matter plugin in the Network Periphery; `uuid:` takes over any plugin Loxone Config made. Settings are the package's parameters, checked by name and type, and a Miniserver's limit per package is honoured. `loxl adopt --uuid … --as <slug>` writes the declaration.
+- **Lox Logic: rooms and categories from source.** `werkstatt = Place("Werkstatt", PType: 6)` and `garten = Category("Garten")` create a room and a category the way Loxone Config does, with their permission group and their app entry. `.room = werkstatt` names one by slug. A rename renames the group; a removal takes it along. Existing ones are externs or `adopt --uuid`.
+
 ## [0.85.0] — 2026-11-15
 
 ### Added

@@ -1,1 +1,0 @@
-- **`loxl adopt --uuid` on the project or the Miniserver** writes their settings into the source as they stand (location, time zone, automatic updates, security switches, where the Miniserver is mounted), so taking them over needs no typing and changes nothing on the next compile.
