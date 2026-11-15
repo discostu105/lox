@@ -850,7 +850,14 @@ impl Module {
         seen: &mut Seen<'a>,
     ) -> Result<()> {
         let tiles_claimed = &mut seen.tiles_claimed;
+        // A hardware declaration is an extern of its device, too.
+        let declared = |slug: &str| {
+            self.blocks()
+                .find(|b| b.slug == slug)
+                .is_some_and(|b| b.block_type == "TreeDevice")
+        };
         match names.get(c.slug.as_str()) {
+            Some(NameKind::Block) if declared(&c.slug) => {}
             Some(NameKind::Extern) => {
                 let ty = self
                     .externs()
@@ -866,8 +873,9 @@ impl Module {
             }
             Some(kind) => {
                 return compile_err(format!(
-                    "`{c}`: `{}` is {}. Tiles are claimed on an extern \
-                                 Touch Pure Flex (`extern {} = TreeDevice(uuid: \"…\")`)",
+                    "`{c}`: `{}` is {}. Tiles are claimed on a Touch Pure \
+                                 Flex, an extern (`extern {} = TreeDevice(uuid: \"…\")`) \
+                                 or a `TreeDevice` declaration",
                     c.slug,
                     kind.describe(),
                     c.slug

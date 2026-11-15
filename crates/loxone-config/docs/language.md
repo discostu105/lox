@@ -749,17 +749,25 @@ states. They are written on every compile.
   LoxAIRAsensor). `off` removes it. Left out, the statistics stay as
   Loxone Config set them.
 - **Ports** are bound in the argument list (`I: klingel.Q`, `I: 30`).
-  `x.Port <- …`, `x.Port = …` and `x.title = …` on a declaration are
-  errors. `.room` and `.category` are allowed; they only rewrite a
-  binding the element has.
+  An output driven from several places takes a list,
+  `I: [alarm.Silent, brandmelder.PreAlarmSignal]`, which Loxone Config
+  ORs like any fan-in. `x.Port <- …`, `x.Port = …` and `x.title = …` on
+  a declaration are errors. `.room` and `.category` are allowed; they
+  only rewrite a binding the element has. So is a Touch Pure Flex's
+  `.tiles` claim (see *Touch Pure Flex tiles*).
 - **Removing** a declaration from the source releases the hardware: the
   element keeps the values the source wrote last, and its wires from
   the argument list leave. Nothing is deleted, except a device the
   source created (below) under `removed <slug>`.
 - `adopt --uuid <device>` declares the device with every I/O below it,
   with the values the config holds. An extern among them keeps its
-  slug, and its statements move into its declaration. Adopting an I/O
-  alone is an error. Pairing a device stays in Loxone Config.
+  slug, and its statements move into its declaration: several `<-`
+  onto one port become a list. A `.tiles`, `.room` or `.category` claim
+  stays as it is. Adopting an I/O alone is an error. Pairing a device
+  stays in Loxone Config.
+- A `defaults` statement the adopt writes covers only types the module
+  declares nowhere yet, so adopting devices one at a time never puts a
+  `defaults` in front of declarations written without one.
 
 #### Creating a Tree device
 
@@ -1554,7 +1562,8 @@ flex_kueche.tiles = kueche
 A `tiles` set names tile programs. A claim `<device>.tiles = <set>` writes them onto one Touch Pure
 Flex; several devices may claim one set.
 
-- The device is an extern `TreeDevice`. Pin it by `uuid:`, since tree device titles are free text.
+- The device is an extern `TreeDevice`, pinned by `uuid:` since tree device titles are free text, or
+  a `TreeDevice` hardware declaration (`flex_kueche = TreeDevice("Flex Küche", serial: "B05DF106")`).
 - A tile is addressed by its index `i` in the config. Lox Logic rewrites the three functions of tiles
   that exist and keeps every unlisted tile unchanged.
 - The layout (which tiles exist, their position, size and icon) stays with Loxone Config.
