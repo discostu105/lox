@@ -592,6 +592,7 @@ fn adopt_one_expanded(
             page_uuid: Some(lift.page_uuids[page].clone()),
             expr_owned: false,
             states: Vec::new(),
+            companions: Vec::new(),
             gui_defaults: false,
         },
     );
@@ -712,6 +713,7 @@ fn adopt_lock(doc: &LoxoneDoc, lift: &Lift, refused: Vec<String>) -> (Lockfile, 
                 page_uuid: Some(lift.page_uuids[page].clone()),
                 expr_owned: lift.exprs.absorbed.contains(&i),
                 states: Vec::new(),
+                companions: Vec::new(),
                 gui_defaults: false,
             },
         );

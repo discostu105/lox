@@ -1,0 +1,1 @@
+- **Lox Logic: rooms and categories from source.** `werkstatt = Place("Werkstatt", PType: 6)` and `garten = Category("Garten")` create a room and a category the way Loxone Config does, with their permission group and their app entry. `.room = werkstatt` names one by slug. A rename renames the group; a removal takes it along. Existing ones are externs or `adopt --uuid`.

@@ -252,6 +252,7 @@ fn pin_identity<'a>(
             page_uuid: None,
             expr_owned: false,
             states: Vec::new(),
+            companions: Vec::new(),
             // A new block gets the values Loxone Config places it with.
             gui_defaults: !crate::gui_defaults::gui_defaults(&block.block_type).is_empty(),
         });
@@ -298,6 +299,9 @@ fn pin_identity<'a>(
         if let Some((n, _)) = save_defaults(&block.block_type) {
             entry.states = (0..n).map(|_| minter.mint_object().to_string()).collect();
         }
+        // A room's permission group and sort node, a category's group.
+        let n = crate::logic::taxonomy::companion_count(&block.block_type);
+        entry.companions = (0..n).map(|_| minter.mint_object().to_string()).collect();
     }
     Ok(entry)
 }

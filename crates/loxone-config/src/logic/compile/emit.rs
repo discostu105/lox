@@ -280,6 +280,15 @@ fn element_attrs(
         el.set_attr("Mode", &next_mode.to_string());
         *next_mode -= 1;
     }
+    // A fresh room or category names its permission group last.
+    if res.is_none()
+        && let Some(group) = lock
+            .objects
+            .get(&block.slug)
+            .and_then(|o| o.companions.first())
+    {
+        el.set_attr("RGR", group);
+    }
     // `At:` is a fixed time of day, `Typ="0"` (#248). Any other `Typ=`
     // is a time function (sunrise, an hour pulse …), and a fixed time
     // on it would mean something else. `Pulse:` claims `Typ=`.

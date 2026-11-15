@@ -71,6 +71,12 @@ edit fields by hand otherwise: a wrong port UUID silently breaks wire identity.
                                     // entry names them; written
                                     // while the base lacks the block.
                                     // Absent for most blocks.
+      "companions": ["…", "…"],     // a new room's or category's
+                                    // permission group (`RGR=`) and, for
+                                    // a room, its sort node in the folder
+                                    // (`<nd>`): minted with it, written
+                                    // while the base lacks them. Absent
+                                    // on every other object.
       "gui_defaults": true          // created with Loxone Config's
                                     // defaults: a port the source gives
                                     // no value gets its GUI default on
@@ -227,7 +233,8 @@ advanced it before failing. The CLI saves the lock only after a successful compi
 `lockfile_version` is checked on load, and unknown versions are refused rather than reinterpreted. An
 older lock loads with the newer fields empty. Saving writes the current version, so an older binary
 refuses the lock instead of silently dropping state it does not know. The one exception: a lock
-without `gui_defaults` on any object is written as v8, since it holds nothing an older binary drops.
+without `gui_defaults` or `companions` on any object is written as v8 (one with `gui_defaults` only as
+v9), since it holds nothing an older binary drops.
 
 | Version | Adds |
 |---|---|
@@ -240,3 +247,4 @@ without `gui_defaults` on any object is written as v8, since it holds nothing an
 | v7 | `rules`: named Automatic Designer rules |
 | v8 | `states` on objects: the special states of a new block |
 | v9 | `gui_defaults` on objects: a block created with Loxone Config's defaults |
+| v10 | `companions` on objects: the permission group and sort node of a new room or category |

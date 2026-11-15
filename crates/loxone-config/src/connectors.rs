@@ -1379,6 +1379,7 @@ pub fn bool_params(block_type: &str) -> &'static [&'static str] {
         "AutoJalousie" => &["Sun"],
         "VirtualHttpInCmd" | "VirtualUdpInCmd" => &["Signed", "Analog"],
         "VirtualOut" => &["CloseAfterSend"],
+        "Place" | "Category" => &["UseFav"],
         _ => &[],
     }
 }
@@ -1396,6 +1397,8 @@ pub fn omitted_when_off(block_type: &str, attr: &str) -> bool {
 /// The numeric settings a save writes only when they are not 0: an
 /// absent attribute is 0, and a save drops an explicit `"0"`.
 const OMITTED_WHEN_ZERO: &[&str] = &[
+    // A room's or category's stars (oracle session 95).
+    "Rating",
     "SourceValLow",
     "DestValLow",
     "SourceValHigh",

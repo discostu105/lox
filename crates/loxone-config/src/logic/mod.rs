@@ -53,6 +53,7 @@ mod rule;
 mod rule_merge;
 pub(crate) mod schedule;
 mod simtest;
+pub(crate) mod taxonomy;
 mod template;
 mod tiles;
 mod validate;

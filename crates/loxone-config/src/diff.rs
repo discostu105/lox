@@ -31,6 +31,10 @@ fn diff_attrs(block_type: &str) -> impl Iterator<Item = &'static str> {
 fn diff_attrs_v(block_type: &str, version: u8) -> impl Iterator<Item = &'static str> {
     let params: Vec<&'static str> = if (version < 8
         && crate::periphery::periphery(block_type).is_some())
+        // A room's or category's app settings (`Rating`, `UseFav`,
+        // `PType`, #324) are not compared: joining them would change the
+        // fingerprint of every config with rooms.
+        || crate::logic::taxonomy::TYPES.contains(&block_type)
         // A PulseAt's fire time (`At:` → `Sec=`, #248) joined in v10.
         || (version < 10 && !clock_params(block_type).is_empty())
     {
