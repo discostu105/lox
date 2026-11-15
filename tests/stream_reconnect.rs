@@ -52,7 +52,7 @@ fn frame(msg_type: u8, payload: &[u8]) -> Message {
     let mut data = vec![0x03, msg_type, 0, 0];
     data.extend_from_slice(&(payload.len() as u32).to_le_bytes());
     data.extend_from_slice(payload);
-    Message::Binary(data)
+    Message::binary(data)
 }
 
 fn value_table(value: f64) -> Message {
@@ -124,8 +124,8 @@ async fn ws_session(mut ws: tokio_tungstenite::WebSocketStream<TcpStream>, sessi
         } else {
             json!("1")
         };
-        let reply = json!({"LL": {"control": cmd, "value": value, "Code": "200"}});
-        ws.send(Message::Text(reply.to_string())).await.unwrap();
+        let reply = json!({"LL": {"control": cmd.as_str(), "value": value, "Code": "200"}});
+        ws.send(Message::text(reply.to_string())).await.unwrap();
         if cmd != "jdev/sps/enablebinstatusupdate" {
             continue;
         }

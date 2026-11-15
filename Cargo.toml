@@ -33,15 +33,15 @@ reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls-webpki
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
-dirs = "5"
+dirs = "7"
 anyhow = "1"
 
 # The Miniserver client (HTTP, token auth, WebSocket, FTP) is crates/loxone-client
 tokio = { version = "1", features = ["full"] }
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 futures-util = "0.3"
-base64 = "0.22"
+base64 = "0.23"
 chrono = { version = "0.4", features = ["clock"] }
 uuid = { version = "1", features = ["v4"] }
 # hidden prompt for `lox user code set`
@@ -52,10 +52,15 @@ rmcp = { version = "3.5", default-features = false, features = ["server", "macro
 schemars = "1"
 
 # OpenTelemetry deps
-opentelemetry = { version = "0.31", default-features = false, features = ["metrics", "logs", "trace"] }
-opentelemetry_sdk = { version = "0.31", default-features = false, features = ["metrics", "logs", "trace", "rt-tokio", "experimental_metrics_periodicreader_with_async_runtime"] }
-opentelemetry-http = { version = "0.31", default-features = false, features = ["reqwest"] }
-opentelemetry-otlp = { version = "0.31", default-features = false, features = ["metrics", "logs", "trace", "http-proto", "reqwest-blocking-client"] }
+opentelemetry = { version = "0.33", default-features = false, features = ["metrics", "logs", "trace"] }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["metrics", "logs", "trace", "rt-tokio", "experimental_metrics_periodicreader_with_async_runtime"] }
+opentelemetry-http = { version = "0.33", default-features = false, features = ["reqwest"] }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["metrics", "logs", "trace", "http-proto", "reqwest-blocking-client"] }
+# The OTLP exporters' HTTP client (opentelemetry-http 0.33 is built on reqwest 0.13).
+# TLS from rustls with the ring provider the rest of lox uses; without a TLS
+# feature here, exports to an https endpoint would fail at run time.
+reqwest_otlp = { package = "reqwest", version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 # Backup deps
 quick-xml = "0.42"
@@ -70,7 +75,7 @@ unicode-segmentation = { version = "1", optional = true }
 libc = { version = "0.2", optional = true }
 
 [dev-dependencies]
-tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
 byteorder = "1"
 # MCP client side for protocol tests of `lox mcp`
 rmcp = { version = "3.5", default-features = false, features = ["client", "server", "macros", "transport-io", "elicitation"] }
