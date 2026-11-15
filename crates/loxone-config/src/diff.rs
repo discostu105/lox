@@ -47,7 +47,15 @@ fn diff_attrs_v(block_type: &str, version: u8) -> impl Iterator<Item = &'static 
     // Device settings (#197) joined in v9, the extensions' and the
     // statistics of hardware inputs and outputs in v11.
     let extension = matches!(block_type, "LoxTree" | "LoxAIR");
-    let settings = if (version >= 9 && (version >= 11 || !extension))
+    // The project's and the Miniserver's settings joined in v14.
+    let system = crate::settings::SYSTEM_TYPES.contains(&block_type);
+    let settings = if system {
+        if version >= 14 {
+            crate::settings::attrs(block_type)
+        } else {
+            Vec::new()
+        }
+    } else if (version >= 9 && (version >= 11 || !extension))
         || (version == 8 && !crate::settings::DEVICE_TYPES.contains(&block_type))
     {
         crate::settings::names(block_type)
@@ -85,7 +93,7 @@ fn since_v13(block_type: &str, _param: &str) -> bool {
     block_type == "EFM"
 }
 
-const FINGERPRINT_VERSION: u8 = 13;
+const FINGERPRINT_VERSION: u8 = 14;
 
 /// One compared attribute of an object: its own, or `Unit` on its
 /// `<Display>` for a physical input or output.
@@ -611,7 +619,16 @@ pub fn semantic_fingerprint(doc: &LoxoneDoc) -> String {
     fingerprint(doc, FINGERPRINT_VERSION)
 }
 
-/// Fingerprint version 12: the current version without the members of
+/// Fingerprint version 13: the current version without the project's and
+/// the Miniserver's settings (`Document`, `LoxLIVE`).
+/// `loxl drift` accepts every older version, so an upgrade alone does not
+/// read as drift. The next compile records the current version.
+#[doc(hidden)] // older forms, for drift checks against old locks
+pub fn semantic_fingerprint_v13(doc: &LoxoneDoc) -> String {
+    fingerprint(doc, 13)
+}
+
+/// Fingerprint version 12: version 13 without the members of
 /// central blocks and the energy flow monitor's units (#278, #253).
 /// `loxl drift` accepts every older version, so an upgrade alone does not
 /// read as drift. The next compile records the current version.

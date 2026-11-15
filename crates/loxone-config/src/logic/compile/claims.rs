@@ -13,6 +13,41 @@ pub(super) fn apply_sets(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuild)
         ..
     } = *cx;
     for s in module.sets() {
+        // A setting of the project or the Miniserver: one attribute or
+        // two (`Updates`), each with the port assignments' lifecycle.
+        if let Some(e) = module.externs().find(|e| e.slug == s.target.slug)
+            && let Some(sys) = crate::settings::system_setting(&e.block_type, &s.target.port)
+            && let Some(owner) = extern_uuid.get(&s.target.slug)
+        {
+            let writes = system_writes(module, s, sys)?;
+            // Automatic in a 17.2 save's form (`AUE="true"`, no `AUM=`) is
+            // automatic already: leave the bytes as they are.
+            if sys.kind == crate::settings::SystemKind::Updates
+                && writes
+                    .iter()
+                    .any(|(n, v)| *n == "AUM" && v.as_deref() == Some("1"))
+                && read_setting(doc, owner, "AUE").as_deref() == Some("true")
+                && read_setting(doc, owner, "AUM").is_none()
+            {
+                continue;
+            }
+            for (name, value) in writes {
+                let original = read_setting(doc, owner, name);
+                if original.is_none() && sys.kind == crate::settings::SystemKind::Text {
+                    return Err(Error::Compile(format!(
+                        "`{}.{}`: the object ({owner}) has no `{name}=`. Lox Logic changes \
+                         this setting but never adds it: save the project once in Loxone \
+                         Config 17.",
+                        s.target.slug, s.target.port
+                    )));
+                }
+                write_setting(doc, owner, name, value.as_deref());
+                lock.set_originals
+                    .entry(crate::settings::key(owner, name))
+                    .or_insert(original);
+            }
+            continue;
+        }
         // A setting of a physical input or output: an attribute of
         // the extern object, with the port assignments' lifecycle.
         if let Some(e) = module.externs().find(|e| e.slug == s.target.slug)
@@ -26,7 +61,8 @@ pub(super) fn apply_sets(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuild)
             let value = module
                 .resolve_value_for(&s.value, &e.block_type, &s.target.slug, &s.target.port)?
                 .into_owned();
-            let original = read_setting(doc, owner, &s.target.port);
+            let name = s.target.port.as_str();
+            let original = read_setting(doc, owner, name);
             // A 0 a save leaves out adds nothing.
             let omitted = crate::connectors::is_zero(&value)
                 && crate::connectors::omitted_when_zero(&e.block_type, &s.target.port);
@@ -37,9 +73,9 @@ pub(super) fn apply_sets(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuild)
                     s.target.slug, s.target.port, s.target.port
                 )));
             }
-            write_setting(doc, owner, &s.target.port, Some(&value));
+            write_setting(doc, owner, name, Some(&value));
             lock.set_originals
-                .entry(crate::settings::key(owner, &s.target.port))
+                .entry(crate::settings::key(owner, name))
                 .or_insert(original);
             continue;
         }
@@ -54,7 +90,12 @@ pub(super) fn apply_sets(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuild)
         .map_err(
             |err| match module.externs().find(|e| e.slug == s.target.slug) {
                 // A device's port that is none: name its settings.
-                Some(e) if crate::settings::DEVICE_TYPES.contains(&e.block_type.as_str()) => {
+                Some(e)
+                    if crate::settings::DEVICE_TYPES
+                        .iter()
+                        .chain(crate::settings::SYSTEM_TYPES)
+                        .any(|t| *t == e.block_type) =>
+                {
                     Error::Compile(format!(
                         "`{}.{}`: neither a port nor a setting of a {} the source can \
                          own ({})",
@@ -77,6 +118,7 @@ pub(super) fn apply_sets(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuild)
                         crate::settings::SETTING_TYPES
                             .iter()
                             .chain(crate::settings::DEVICE_TYPES)
+                            .chain(crate::settings::SYSTEM_TYPES)
                             .copied()
                             .collect::<Vec<_>>()
                             .join(", ")
@@ -98,6 +140,73 @@ pub(super) fn apply_sets(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuild)
             .or_insert(original);
     }
     Ok(())
+}
+
+/// The attributes a project or Miniserver setting writes, `None` for one
+/// a save leaves out.
+fn system_writes(
+    module: &Module,
+    s: &crate::logic::ast::SetDecl,
+    sys: crate::settings::SystemSetting,
+) -> Result<Vec<(&'static str, Option<String>)>> {
+    use crate::settings::SystemKind;
+    let at = || format!("`{}.{}`", s.target.slug, s.target.port);
+    Ok(match sys.kind {
+        SystemKind::Text | SystemKind::AddableText => {
+            vec![(sys.attr, Some(module.resolve_value(&s.value)?.into_owned()))]
+        }
+        SystemKind::Switch { on, off } => {
+            let value = match &s.value {
+                Value::Bool(b) => *b,
+                _ => {
+                    return Err(Error::Compile(format!("{} takes on or off", at())));
+                }
+            };
+            vec![(sys.attr, if value { on } else { off }.map(str::to_string))]
+        }
+        SystemKind::MinuteOfDay => {
+            let minutes = match &s.value {
+                Value::Clock(t) => {
+                    let mut parts = t.split(':').map(|p| p.parse::<u32>().unwrap_or(0));
+                    let (h, m, sec) = (
+                        parts.next().unwrap_or(0),
+                        parts.next().unwrap_or(0),
+                        parts.next().unwrap_or(0),
+                    );
+                    if sec != 0 {
+                        return Err(Error::Compile(format!(
+                            "{} takes whole minutes (`{h:02}:{m:02}`)",
+                            at()
+                        )));
+                    }
+                    h * 60 + m
+                }
+                _ => {
+                    return Err(Error::Compile(format!(
+                        "{} takes a time of day, like `02:00`",
+                        at()
+                    )));
+                }
+            };
+            vec![(sys.attr, Some(minutes.to_string()))]
+        }
+        SystemKind::Updates => {
+            let word = module.resolve_value(&s.value)?;
+            let modes = crate::settings::UPDATE_MODES;
+            let Some((_, aue, aum)) = modes.iter().find(|(w, _, _)| *w == word) else {
+                let words: Vec<(&str, &str)> = modes.iter().map(|(w, _, _)| (*w, "")).collect();
+                return Err(Error::Compile(format!(
+                    "{}: `{word}` is not one of {}",
+                    at(),
+                    crate::connectors::choice_list(&words)
+                )));
+            };
+            vec![
+                ("AUE", aue.map(str::to_string)),
+                (sys.attr, Some(aum.to_string())),
+            ]
+        }
+    })
 }
 
 /// A Def write that vanished from source was withdrawn — tombstone it

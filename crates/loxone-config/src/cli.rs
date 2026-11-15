@@ -2509,7 +2509,11 @@ fn cmd_drift(args: &[&str]) -> Result<ExitCode, AnyError> {
     // current one.
     use loxone_config::diff as d;
     type Form = fn(&LoxoneDoc) -> String;
-    let older: [(Form, &str); 12] = [
+    let older: [(Form, &str); 13] = [
+        (
+            d::semantic_fingerprint_v13,
+            "project and Miniserver settings",
+        ),
         (
             d::semantic_fingerprint_v12,
             "central block members and energy flow units",

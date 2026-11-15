@@ -1215,6 +1215,24 @@ parameters, inputs wired from virtual inputs, and every output wired into a `For
   order and UUIDs, and an empty semantic diff. A recompile onto the saved file was byte-identical, and so was
   a compile of the module `loxl adopt` made from it.
 
+## Project and Miniserver settings (session 94, D135) — passed
+
+Ran 2026-11-15 with Loxone Config 17.3.11.12 on a private prefix and display, offline. The base was
+`examples/library/access/access.Loxone` (a 17.2 save: `UpdTime="120" AUE="true"`, no `AUM`). Each field of
+the project's properties pane was changed and saved to its own copy, cumulatively: the three update
+modes, the update time, LOXONE Log, password reset, extended login validity, the application firewall,
+the 24 hour format, elevation, time server and currency. The facts are in
+[loxone-format.md](loxone-format.md) (*Project and Miniserver settings*).
+
+- The update mode is `AUE=` and `AUM=` together; *Never* removes `AUE=` and asks first, because it
+  also switches off Remote Connect and external access.
+- Every switch is an attribute a save writes in one state only. `CrashL=` is removed when unticked,
+  never `"false"`.
+- **Finding — no pane shows `DeviceTelemetry=`**, and no Miniserver field writes `HoN=`. Neither is
+  claimable.
+- The first 17.3 save also raises `LoxLIVE` to `V="179"`, adds `SwBU=` to it and `WF="16384"` to the
+  project. That is the save fingerprint of 17.3, not one of the settings.
+
 ## Block settings (sessions 43 and 44, D95) — passed, four findings
 
 Ran 2026-11-01 with Loxone Config 17.2.8.28 on a private prefix and display, offline. The base was

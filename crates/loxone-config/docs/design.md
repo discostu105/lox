@@ -251,3 +251,4 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D132 | [A stale lifecycle statement is a lint, `every:`, `°`, and `step` next to `tick`](decisions/0132-lifecycle-lint-every-degrees-step.md) | accepted (language v3, part two) |
 | D133 | [Externs take bindings, expressions wrap and compute, `page` is a file header](decisions/0133-extern-bindings-expressions-page-header.md) | accepted (language v3, part two) |
 | D134 | [Templates are block types](decisions/0134-templates-as-block-types.md) | accepted (language v3, part three) |
+| D135 | [The project's and the Miniserver's settings from source](decisions/0135-project-and-miniserver-settings.md) | accepted, extends [D65](decisions/0065-physical-io-settings.md) |

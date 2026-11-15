@@ -108,20 +108,198 @@ fn device_settings(block_type: &str) -> &'static [(&'static str, bool)] {
     }
 }
 
-fn settings_of(block_type: &str) -> &'static [(&'static str, bool)] {
+/// The project (`Document`) and the Miniserver (`LoxLIVE`): the settings
+/// of the house that live outside the pages, as the project's and the
+/// Miniserver's properties panes in Loxone Config 17.3 show them (oracle
+/// session 94).
+///
+/// Not claimable: the identity and bookkeeping (`U`, `ConfigVersion`,
+/// `Date`, `NumO`, `APPKEY`, …), the program cycle (`SPSfreq`), the display
+/// units (codes whose words are unknown), `DeviceTelemetry` (no pane shows
+/// it) and the addresses Loxone Config connects to (`IntAddr`, `ExtAddr`),
+/// which say nothing to the Miniserver.
+pub const SYSTEM_TYPES: &[&str] = &["Document", "LoxLIVE"];
+
+/// How a project or Miniserver setting is stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SystemKind {
+    /// The value as written, in one attribute every save writes.
+    Text,
+    /// A number a save writes only once it is set (`SL=`).
+    AddableText,
+    /// `on`/`off`: the attribute's value for each, `None` for no attribute.
+    Switch {
+        on: Option<&'static str>,
+        off: Option<&'static str>,
+    },
+    /// A time of day (`02:00`), stored as minutes after midnight.
+    MinuteOfDay,
+    /// The automatic updates: `AUE=` and `AUM=` together.
+    Updates,
+}
+
+/// One claimable project or Miniserver setting.
+#[derive(Debug, Clone, Copy)]
+pub struct SystemSetting {
+    /// The name in source: the attribute's where that is the plain word,
+    /// the pane's word where the attribute is a code.
+    pub name: &'static str,
+    /// The attribute it is stored in (`Updates` also writes `AUE=`).
+    pub attr: &'static str,
+    pub kind: SystemKind,
+}
+
+const fn text(name: &'static str, attr: &'static str) -> SystemSetting {
+    SystemSetting {
+        name,
+        attr,
+        kind: SystemKind::Text,
+    }
+}
+
+const fn switch(
+    name: &'static str,
+    attr: &'static str,
+    on: Option<&'static str>,
+    off: Option<&'static str>,
+) -> SystemSetting {
+    SystemSetting {
+        name,
+        attr,
+        kind: SystemKind::Switch { on, off },
+    }
+}
+
+const PROJECT: &[SystemSetting] = &[
+    // Where the house stands: the sun times, the weather and the
+    // holidays follow from it.
+    text("Street", "Street"),
+    text("Town", "Town"),
+    text("PostCode", "PostCode"),
+    text("Country", "Ctry"),
+    text("Latitude", "Latitude"),
+    text("Longitude", "Longitude"),
+    SystemSetting {
+        name: "Altitude",
+        attr: "SL",
+        kind: SystemKind::AddableText,
+    },
+    text("Timezone", "Timezone"),
+    // Empty: Loxone's own time server.
+    text("Timeserver", "Timeserver"),
+    text("Currency", "Currency"),
+    // The automatic updates. Without them there is no Remote Connect.
+    SystemSetting {
+        name: "Updates",
+        attr: "AUM",
+        kind: SystemKind::Updates,
+    },
+    SystemSetting {
+        name: "UpdateTime",
+        attr: "UpdTime",
+        kind: SystemKind::MinuteOfDay,
+    },
+    // Security.
+    switch("AppFirewall", "FwMode", None, Some("0")),
+    switch("PasswordReset", "NoPwReset", None, Some("true")),
+    switch("ExtendedLogin", "ExtVal", Some("true"), None),
+    // Crash and diagnostic reports to Loxone ("LOXONE Log").
+    switch("LoxoneLog", "CrashL", Some("true"), None),
+];
+
+const MINISERVER: &[SystemSetting] = &[
+    text("Installation", "Installation"),
+    text("SwitchBoard", "SwitchBoard"),
+    text("SwitchBoardRow", "SwitchBoardRow"),
+    text("SwitchBoardPos", "SwitchBoardPos"),
+];
+
+/// The update modes: the word, `AUE=` and `AUM=`. A 17.2 save writes no
+/// `AUM=`; Loxone Config 17.3 reads `AUE="true"` alone as automatic.
+pub const UPDATE_MODES: &[(&str, Option<&str>, &str)] = &[
+    ("auto", Some("true"), "1"),
+    ("confirm", Some("true"), "2"),
+    ("never", None, "0"),
+];
+
+/// The settings of a project or Miniserver.
+pub fn system_settings(block_type: &str) -> &'static [SystemSetting] {
+    match block_type {
+        "Document" => PROJECT,
+        "LoxLIVE" => MINISERVER,
+        _ => &[],
+    }
+}
+
+/// A project or Miniserver setting by name.
+pub fn system_setting(block_type: &str, name: &str) -> Option<SystemSetting> {
+    system_settings(block_type)
+        .iter()
+        .find(|s| s.name == name)
+        .copied()
+}
+
+/// The order a save writes the project's attributes in (Loxone Config 17.3):
+/// where an added one goes.
+const PROJECT_ORDER: &[&str] = &[
+    "Latitude",
+    "Longitude",
+    "SL",
+    "Timezone",
+    "Timeserver",
+    "Tel",
+    "EMail",
+    "Web",
+    "Logo",
+    "Cust",
+    "uuidNotifications",
+    "uuidFavSeq",
+    "uuidFavCol",
+    "FC",
+    "uuidTime",
+    "12hTF",
+    "dtfmt",
+    "Currency",
+    "UpdTime",
+    "ExtVal",
+    "AUE",
+    "AUM",
+    "DeviceTelemetry",
+    "CrashL",
+    "FwMode",
+    "NoPwReset",
+    "Geo",
+    "NumO",
+    "NumPresets",
+    "APPKEY",
+    "APPID",
+];
+
+/// The element attribute a setting is stored in: the setting's own name,
+/// except where the attribute is a code (`Country` is `Ctry=`).
+pub fn attr<'a>(block_type: &str, name: &'a str) -> &'a str {
+    system_setting(block_type, name).map_or(name, |s| s.attr)
+}
+
+fn settings_of(block_type: &str) -> Vec<(&'static str, bool)> {
     if SETTING_TYPES.contains(&block_type) {
-        SETTINGS
+        SETTINGS.to_vec()
+    } else if SYSTEM_TYPES.contains(&block_type) {
+        system_settings(block_type)
+            .iter()
+            .map(|s| (s.name, s.kind != SystemKind::Text))
+            .collect()
     } else {
-        device_settings(block_type)
+        device_settings(block_type).to_vec()
     }
 }
 
 /// `Some(addable)` when `name` is a claimable setting of `block_type`.
 pub fn setting(block_type: &str, name: &str) -> Option<bool> {
     settings_of(block_type)
-        .iter()
+        .into_iter()
         .find(|(n, _)| *n == name)
-        .map(|(_, a)| *a)
+        .map(|(_, a)| a)
 }
 
 /// Whether `name` is a setting of some physical input, output or device.
@@ -130,11 +308,30 @@ pub fn is_setting(name: &str) -> bool {
         .iter()
         .chain(DEVICE_TYPES.iter().flat_map(|t| device_settings(t)))
         .any(|(n, _)| *n == name)
+        || SYSTEM_TYPES
+            .iter()
+            .flat_map(|t| system_settings(t))
+            .any(|s| s.name == name)
 }
 
 /// The settings of a type, for messages.
 pub fn names(block_type: &str) -> Vec<&'static str> {
-    settings_of(block_type).iter().map(|(n, _)| *n).collect()
+    settings_of(block_type)
+        .into_iter()
+        .map(|(n, _)| n)
+        .collect()
+}
+
+/// The attributes of a type's settings, for the comparison.
+pub fn attrs(block_type: &str) -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = settings_of(block_type)
+        .into_iter()
+        .map(|(n, _)| attr(block_type, n))
+        .collect();
+    if system_setting(block_type, "Updates").is_some() {
+        out.push("AUE");
+    }
+    out
 }
 
 /// The lock key of a setting claim: it shares the port assignments'
@@ -152,10 +349,24 @@ pub fn split_key(key: &str) -> Option<(&str, &str)> {
 /// Where an added attribute goes: before the first present one that
 /// Loxone Config writes after it; `Desc` right after `Type`.
 pub fn insert_position(attrs: &[&str], name: &str) -> usize {
+    insert_position_in(ORDER, attrs, name)
+}
+
+/// [`insert_position`] on an element of `block_type`: the project has an
+/// order of its own.
+pub fn insert_position_for(block_type: &str, attrs: &[&str], name: &str) -> usize {
+    if block_type == "Document" {
+        insert_position_in(PROJECT_ORDER, attrs, name)
+    } else {
+        insert_position(attrs, name)
+    }
+}
+
+fn insert_position_in(order: &[&str], attrs: &[&str], name: &str) -> usize {
     if name == "Desc" {
         return attrs.iter().position(|a| *a == "Type").map_or(0, |p| p + 1);
     }
-    let rank = |n: &str| ORDER.iter().position(|o| *o == n);
+    let rank = |n: &str| order.iter().position(|o| *o == n);
     let Some(mine) = rank(name) else {
         return attrs.len();
     };
@@ -192,5 +403,41 @@ mod tests {
         assert_eq!(setting("LoxAIRDevice", "MinTime"), None);
         assert!(is_setting("Installation"));
         assert_eq!(names("TreeDevice").len(), 5);
+    }
+
+    #[test]
+    fn project_and_miniserver_settings_name_their_codes() {
+        assert_eq!(setting("Document", "Country"), Some(false));
+        assert_eq!(setting("Document", "Ctry"), None);
+        assert_eq!(attr("Document", "Country"), "Ctry");
+        assert_eq!(attr("Document", "Altitude"), "SL");
+        assert_eq!(attr("Document", "Updates"), "AUM");
+        assert_eq!(attr("TreeDevice", "Desc"), "Desc");
+        assert_eq!(setting("Document", "SPSfreq"), None);
+        assert_eq!(setting("LoxLIVE", "IntAddr"), None);
+        assert!(is_setting("Timezone"));
+        assert!(attrs("Document").contains(&"CrashL"));
+        assert!(attrs("Document").contains(&"AUE"));
+        assert_eq!(setting("Document", "DeviceTelemetry"), None);
+        assert_eq!(setting("Document", "Altitude"), Some(true));
+        assert_eq!(setting("Document", "Timezone"), Some(false));
+    }
+
+    #[test]
+    fn added_project_attributes_take_the_save_order() {
+        let attrs = [
+            "Type",
+            "Longitude",
+            "Timezone",
+            "Currency",
+            "UpdTime",
+            "AUE",
+            "CrashL",
+            "Geo",
+        ];
+        assert_eq!(insert_position_for("Document", &attrs, "SL"), 2);
+        assert_eq!(insert_position_for("Document", &attrs, "AUM"), 6);
+        assert_eq!(insert_position_for("Document", &attrs, "ExtVal"), 5);
+        assert_eq!(insert_position_for("Document", &attrs, "FwMode"), 7);
     }
 }
