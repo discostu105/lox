@@ -10,6 +10,11 @@ when it is released.
 
 ## [Unreleased]
 
+## [0.86.1] — 2026-11-15
+
+### Changed
+- Dependency updates: base64, dirs, lz4_flex, hmac, tokio-tungstenite, opentelemetry (#412)
+
 ## [0.86.0] — 2026-11-15
 
 ### Added
