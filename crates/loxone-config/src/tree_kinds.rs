@@ -246,7 +246,7 @@ impl TreeKind {
     }
 }
 
-fn fill(el: &mut Element, minter: &mut Minter, entity: [u8; 6]) {
+pub(crate) fn fill(el: &mut Element, minter: &mut Minter, entity: [u8; 6]) {
     if el.attr("U") == Some("@U") {
         let u = minter.mint_object().to_string();
         el.set_attr("U", &u);

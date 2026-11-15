@@ -800,6 +800,38 @@ the lockfile keeps it. Pair it with a Tree search in Loxone Config.
   in Loxone Config, gets it back under the same UUID.
 - No compile deletes any other hardware.
 
+### Plugins — the *Network Periphery*
+
+```text
+mcp = Plugin("MCP Server", gid: "McpServer", custom_local_url: "https://loxone.local/mcp")
+matter = Plugin("Matter", uuid: "1f0e2a4b-0012-ab34-ffff504f94112233",
+                mx_add_roomnames_to_endpoint_names: off)
+```
+
+A plugin (MCP Server, Matter, HomeKit, Exosphere, …) is an object in the
+*Network Periphery* folder. `uuid:` takes over one that Loxone Config made;
+`gid:` (the package, `McpServer` or `Matter`) creates one, and from then on
+the lockfile keeps it.
+
+- **Settings** are the package's parameters, the parameter id with `-`
+  written as `_` (`custom-local-url` → `custom_local_url`). A tick box
+  takes `on`/`off`, a number a number, a time a time of day, everything
+  else a quoted string; `""` clears a text. A name the package does not
+  have is an error that lists the ones it has. A setting the source does
+  not name stays as it is.
+- **How many:** a package that a Miniserver takes once (MCP Server,
+  Matter, HomeKit, Alexa, …) is not created a second time: the error
+  names the one the config holds, to declare by `uuid:` instead.
+- **Creating** works for MCP Server and Matter. Any other package is
+  added in Loxone Config and then declared by `uuid:`.
+- **Installing** the package on the Miniserver is Loxone Config's (or the
+  push's) job; the compile writes only the object.
+- **Deleting** a created plugin takes `removed <slug>`, as for a created
+  Tree device.
+- **`loxl adopt --uuid … --as <slug>`** writes the declaration with the
+  settings the package shows.
+- `.title`, `.room` and `.category` work as on any declaration.
+
 ### Operating modes — minted into the "Betriebsmodi" folder
 
 ```text

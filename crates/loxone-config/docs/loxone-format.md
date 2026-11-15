@@ -1090,6 +1090,29 @@ runs a device it has not searched for yet is not verified. What a save writes on
 - **`WF`** is 16384 or 16400 on corpus devices; bit `0x10` varies within one kind and one config. A
   save keeps 16384.
 
+### Plugins in the Network Periphery
+
+A plugin is a `<C Type="Plugin" gid="…">` in the `WeatherCaption` with `CaptionType="27"`
+(*Netzwerkperipherie*, *Network Periphery*). `gid=` is the package id (`McpServer`, `Matter`, `Exo`, …).
+The package itself (`<gid>.json` inside the `.LxAddOn` zip Loxone Config downloads to
+`Documents/Loxone/Loxone Config/addons/`) lists the parameters; the add-on catalogue `addons.json` in
+the version's ProgramData gives `maxCountPerMiniserver`. What a save writes (oracle session 96, Config
+17.3.11.12):
+
+- **Shape.** `Type gid V U Title Cl="0,0,0" WF="16384" Addr="" MAC=""`, then `<SET>`, `<IoData></IoData>`
+  and the online status (`Type="Online"`, `IName="S1"`, titled `Online Status <title>`, `<IoData St="2"/>`).
+  In the house's config, `Cr=`/`Pr=` on the plugin name the unassigned category and room.
+- **`<SET>`** has one child per parameter, named by the parameter id, with `t=` the manifest's type
+  (1 tick box, 7 number, 8 choice by value, 11 text, 12 choice by key, 15 password, 16 time
+  `HH:MM:SS`) and the value in `v=`. A tick box is `v="true"` or no `v=`: a save drops `v="false"`. An
+  empty text has no `v=`.
+- **`Desc=` and `NDOC=`.** The first save adds `Desc=` after `gid=` and `NDOC=` at the end of the
+  plugin's attributes, both from the package's documentation in the GUI's language.
+- **Filled by a save.** A bare `<C Type="Plugin" gid="Exo"/>` gets every default in `<SET>`, the
+  attributes above and an online status. A plugin with `<SET>` but no online status gets one.
+- **Exosphere.** A 17.3 save moves an `Exo` plugin into a `LoxCaption CaptionType="36"` (*Exosphere*).
+- A plugin the save already finds complete is kept as it is, `V=` raised with the version.
+
 ## Time functions: per-project singletons
 
 The GUI's *Zeitfunktionen* periphery folder is a `TimeCaption` element

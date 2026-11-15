@@ -882,7 +882,9 @@ fn resolve_externs(
                             .element_at(&o.path)
                             .and_then(crate::doc::element_serial)
                             .is_some_and(|s| crate::doc::same_serial(&s, v)),
-                        MatchSpec::Create { .. } => created.get(&ext.slug) == Some(&o.uuid),
+                        MatchSpec::Create { .. } | MatchSpec::Plugin { .. } => {
+                            created.get(&ext.slug) == Some(&o.uuid)
+                        }
                         // The device's uuid comes in as `mirror_uuid`.
                         MatchSpec::Within { iname, .. } => {
                             o.iname.as_deref() == Some(iname)
