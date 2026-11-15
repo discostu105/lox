@@ -287,3 +287,33 @@ fn lox_variables_work_without_a_config_file_and_are_never_saved() {
         .unwrap();
     assert!(String::from_utf8_lossy(&shown.stdout).contains("guest"));
 }
+
+/// HOME and the working directory can name the same place differently
+/// (macOS: /var is /private/var). Run in the home directory, the global
+/// `~/.lox` is still the global config, not a project's.
+#[test]
+fn the_global_config_is_found_through_a_symlinked_home() {
+    let contexts = "contexts:\n  home:\n    host: https://h\n    user: u\n    pass: p\n";
+    let real = tempfile::tempdir().unwrap();
+    fs::create_dir_all(real.path().join(".lox")).unwrap();
+    fs::write(real.path().join(".lox").join("config.yaml"), contexts).unwrap();
+    let links = tempfile::tempdir().unwrap();
+    let home = links.path().join("home");
+    std::os::unix::fs::symlink(real.path(), &home).unwrap();
+
+    let out = Command::cargo_bin("lox")
+        .unwrap()
+        .env_remove("LOX_CONFIG")
+        .env("HOME", &home)
+        .current_dir(real.path())
+        .args(["setup", "set", "--host", "other.example"])
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(err.contains("lox ctx use"), "{err}");
+    assert_eq!(
+        fs::read_to_string(real.path().join(".lox").join("config.yaml")).unwrap(),
+        contexts
+    );
+}

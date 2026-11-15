@@ -15,6 +15,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # Its version is the Rust version to install: @stable, and @1.91 for
+      # the minimum Rust version job, which must stay at rust-version.
+      - dependency-name: dtolnay/rust-toolchain
     groups:
       actions:
         patterns: ["*"]
