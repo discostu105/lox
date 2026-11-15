@@ -179,6 +179,10 @@ fn adopt_one_expanded(
              monitor's own meter). Adopt that block instead."
         )));
     }
+    if crate::settings::SYSTEM_TYPES.contains(&o.block_type.as_str()) {
+        check_slug(slug).map_err(fail)?;
+        return super::adopt_system::adopt_system(doc, o, &ident, slug, module, lock);
+    }
     if builtin(&o.block_type).is_none() && !crate::hardware::is_hardware(&o.block_type) {
         return Err(fail(format!(
             "cannot adopt {ident}: `{}` is not a type loxl can manage yet. Keep it as an extern.",
@@ -223,16 +227,7 @@ fn adopt_one_expanded(
             doc.config_version().as_deref().unwrap_or("(none)")
         )));
     }
-    let valid = matches!(slug.as_bytes().first(), Some(b) if b.is_ascii_lowercase())
-        && slug
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
-        && !RESERVED.contains(&slug);
-    if !valid {
-        return Err(fail(format!(
-            "`{slug}` is not a valid slug ([a-z][a-z0-9_]*, no statement keyword)"
-        )));
-    }
+    check_slug(slug).map_err(fail)?;
     let mut taken: BTreeSet<String> = module
         .externs()
         .map(|e| e.slug.clone())
@@ -1037,4 +1032,20 @@ fn adopt_rule(
         promoted: promoted.into_iter().collect(),
         on_page: true,
     })
+}
+
+/// `Err(why)` unless `slug` is a valid slug for a new declaration.
+fn check_slug(slug: &str) -> std::result::Result<(), String> {
+    let valid = matches!(slug.as_bytes().first(), Some(b) if b.is_ascii_lowercase())
+        && slug
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        && !RESERVED.contains(&slug);
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "`{slug}` is not a valid slug ([a-z][a-z0-9_]*, no statement keyword)"
+        ))
+    }
 }

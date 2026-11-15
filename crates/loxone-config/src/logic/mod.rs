@@ -32,6 +32,7 @@
 mod access;
 mod adopt;
 mod adopt_hardware;
+mod adopt_system;
 mod adopt_tree;
 mod ast;
 pub(crate) mod calendar;

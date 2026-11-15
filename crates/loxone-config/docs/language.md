@@ -992,6 +992,9 @@ extensions. Its name is a `.title` claim.
   `Updates` and the switches are added where a save adds them.
 - Anything else on the two objects (the program cycle, the display units, the addresses Loxone Config
   connects to, the identity) is not a setting, and naming one is an error that lists the settings.
+- `loxl adopt <cfg> --uuid <uuid> --as haus --module pages --lock …` on either object writes its
+  settings as they stand: the `extern` line and one claim per setting, into `pages/miniserver.loxl`.
+  Settings the module claims already are kept, and a setting a save has not written yet is left out.
 
 ### `(a, b, …).X = value` — one setting on several objects
 

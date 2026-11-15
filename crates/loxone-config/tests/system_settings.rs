@@ -2,7 +2,7 @@
 //! location, the automatic updates, the security switches and where the
 //! Miniserver is mounted, each restored when its claim leaves the source.
 
-use loxone_config::logic::{CompileOptions, Module, compile};
+use loxone_config::logic::{CompileOptions, Module, adopt_one, compile};
 use loxone_config::uuid::parse_serial;
 use loxone_config::{Lockfile, LoxoneDoc};
 
@@ -174,4 +174,78 @@ fn wrong_values_are_refused() {
     // A text setting is rewritten, never added.
     let e = err("haus.Town = \"Linz\"\nhaus.Tel = \"1\"\n");
     assert!(e.contains("Timeserver"), "{e}");
+}
+
+/// Adopt the project and the Miniserver of `doc` into an empty module:
+/// the claims as source text and the lock.
+fn adopt_both(doc: &LoxoneDoc) -> (String, Lockfile) {
+    let mut lock = Lockfile::default();
+    let mut module = Module::parse("").unwrap();
+    for (uuid, slug) in [(DOC, "haus"), (MS, "ms")] {
+        let adopted = adopt_one(doc, uuid, slug, &module, &mut lock).unwrap();
+        module.items.extend(adopted.items);
+    }
+    (module.to_text(), lock)
+}
+
+#[test]
+fn adopting_lifts_every_setting_as_it_stands() {
+    // A 17.2 save: `AUE="true"` alone reads as automatic, and the
+    // settings it has not written (`SL=`) stay unclaimed.
+    let (text, lock) = adopt_both(&base());
+    for line in [
+        "haus.Country = \"AT\"",
+        "haus.Latitude = 48.3",
+        "haus.Updates = \"auto\"",
+        "haus.UpdateTime = 02:00",
+        "haus.AppFirewall = on",
+        "haus.PasswordReset = on",
+        "haus.ExtendedLogin = off",
+        "haus.LoxoneLog = on",
+        "ms.SwitchBoard = \"Schaltschrank\"",
+        "ms.SwitchBoardRow = 1",
+    ] {
+        assert!(text.contains(line), "{line} missing in:\n{text}");
+    }
+    assert!(!text.contains("Altitude"), "{text}");
+    // Compiling the adopted pair changes neither the config nor the lock.
+    let module = Module::parse(&text).unwrap();
+    let mut after = lock.clone();
+    let out = compile(&base(), &module, &mut after, &opts()).unwrap();
+    for uuid in [DOC, MS] {
+        assert_eq!(element(&out, uuid).attrs, element(&base(), uuid).attrs);
+    }
+    assert_eq!(after.set_originals, lock.set_originals);
+
+    // Every other value round-trips: compile claims, adopt the result,
+    // and the adopted pair rebuilds it byte for byte.
+    for claims in [
+        "haus.Altitude = 400\nhaus.Updates = \"confirm\"\nhaus.UpdateTime = 03:30\n\
+         haus.ExtendedLogin = on\nhaus.AppFirewall = off\nhaus.PasswordReset = off\n\
+         haus.LoxoneLog = off\nms.Installation = \"Technikraum\"\n",
+        "haus.Updates = \"never\"\n",
+        "haus.Updates = \"auto\"\nhaus.UpdateTime = 23:59\n",
+    ] {
+        let saved = run(claims).unwrap();
+        let (text, lock) = adopt_both(&saved);
+        for line in claims.lines() {
+            assert!(text.contains(line), "{line} missing in:\n{text}");
+        }
+        let mut after = lock.clone();
+        let out = compile(&saved, &Module::parse(&text).unwrap(), &mut after, &opts()).unwrap();
+        assert_eq!(out.to_bytes(), saved.to_bytes(), "{claims}");
+        assert_eq!(after.set_originals, lock.set_originals, "{claims}");
+    }
+}
+
+#[test]
+fn adopting_twice_has_nothing_left() {
+    let mut lock = Lockfile::default();
+    let module = Module::parse("").unwrap();
+    let first = adopt_one(&base(), DOC, "haus", &module, &mut lock).unwrap();
+    let module = Module { items: first.items };
+    let err = adopt_one(&base(), DOC, "haus", &module, &mut lock).unwrap_err();
+    assert!(err.to_string().contains("nothing to adopt"), "{err}");
+    let err = adopt_one(&base(), DOC, "projekt", &module, &mut lock).unwrap_err();
+    assert!(err.to_string().contains("--as haus"), "{err}");
 }
