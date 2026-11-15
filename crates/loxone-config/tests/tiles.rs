@@ -602,3 +602,51 @@ fn dead_commands_of_one_type_are_one_finding_per_device() {
         dead[0]
     );
 }
+
+/// The Touch Pure Flex as a hardware declaration instead of an extern.
+fn declared(rest: &str) -> Module {
+    let externs = EXTERNS.replacen(
+        "extern flex = TreeDevice(uuid: \"40000001-0000-0010-ffff504f94112233\")",
+        "flex = TreeDevice(\"Touch Pure Flex Küche\", uuid: \"40000001-0000-0010-ffff504f94112233\")",
+        1,
+    );
+    Module::parse(&format!("{externs}\n{rest}")).unwrap()
+}
+
+#[test]
+fn a_declared_touch_pure_flex_carries_its_tiles() {
+    let base = base();
+    let by_extern = compile(&base, &module(KUECHE_SET), &mut Lockfile::new(), &opts()).unwrap();
+    let m = declared(KUECHE_SET);
+    let mut lock = Lockfile::new();
+    let out = compile(&base, &m, &mut lock, &opts()).unwrap();
+    for i in ["2", "3", "4", "5"] {
+        assert_eq!(btn(&out, KUECHE, i), btn(&by_extern, KUECHE, i), "tile {i}");
+    }
+    assert!(lock.externals["flex"].owned);
+    let again = compile(&out, &m, &mut lock, &opts()).unwrap();
+    assert_eq!(again.to_bytes(), out.to_bytes());
+}
+
+#[test]
+fn adopting_a_touch_pure_flex_keeps_its_tiles_claim() {
+    let base = base();
+    let m = module(KUECHE_SET);
+    let mut lock = Lockfile::new();
+    let doc = compile(&base, &m, &mut lock, &opts()).unwrap();
+    let adopted = loxone_config::logic::adopt_one(&doc, KUECHE, "flex", &m, &mut lock).unwrap();
+    assert_eq!(adopted.promoted, ["flex"]);
+    // The claim stays a statement of its own, next to the declaration.
+    let mut rest = m.clone();
+    rest.strip_extern("flex");
+    rest.items.extend(adopted.items);
+    let text = rest.to_text();
+    assert!(
+        text.contains("flex = TreeDevice(\"Touch Pure Flex Küche\""),
+        "{text}"
+    );
+    assert!(text.contains("flex.tiles = kueche"), "{text}");
+    let module = Module::parse(&text).unwrap();
+    let out = compile(&doc, &module, &mut lock, &opts()).unwrap();
+    assert_eq!(out.to_bytes(), doc.to_bytes());
+}

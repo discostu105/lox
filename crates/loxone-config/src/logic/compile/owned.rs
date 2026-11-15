@@ -54,7 +54,7 @@ pub(super) fn apply_owned(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuild
                 o.slug, o.block_type
             )));
         }
-        write_owned(doc, module, uuid, o)?;
+        write_owned(doc, cx, uuid, o)?;
         // A claim withdrawn in favor of the declaration leaves no
         // tombstone: the declaration's value stands.
         if let Some(m) = lock.removed_attrs.get_mut(uuid) {
@@ -76,7 +76,7 @@ pub(super) fn apply_owned(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuild
 
 fn write_owned(
     doc: &mut LoxoneDoc,
-    module: &Module,
+    cx: &Rebuild,
     uuid: &str,
     o: &crate::logic::ast::OwnedDecl,
 ) -> Result<()> {
@@ -94,17 +94,16 @@ fn write_owned(
             write_claimed(doc, &r, Attr::Title, t);
         }
     }
-    for (attr, value, ty) in [
-        (Attr::Room, &o.room, "Place"),
-        (Attr::Category, &o.category, "Category"),
-    ] {
+    for (attr, value) in [(Attr::Room, &o.room), (Attr::Category, &o.category)] {
         let Some(v) = value else { continue };
-        let title = module.resolve_value(v)?.to_string();
-        let target = taxonomy_uuid(doc, ty, attr.name(), &title)?;
+        let target = taxonomy_target(doc, cx, attr, v)?;
         if read_claimed(doc, uuid, attr).is_none() {
             return Err(missing(claim_slot(attr)));
         }
         write_claimed(doc, uuid, attr, &target);
+    }
+    if o.block_type == "Plugin" {
+        return write_plugin_params(doc, cx.module, uuid, o);
     }
     for (name, v) in &o.settings {
         if name == STATISTICS {
@@ -123,13 +122,88 @@ fn write_owned(
             continue;
         }
         let addable = crate::settings::setting(&o.block_type, name).expect("lowering checked");
-        let value = module
+        let value = cx
+            .module
             .resolve_value_for(v, &o.block_type, &o.slug, name)?
             .into_owned();
         if read_setting(doc, uuid, name).is_none() && !addable {
             return Err(missing(&format!("`{name}` setting")));
         }
         write_setting(doc, uuid, name, Some(&value));
+    }
+    Ok(())
+}
+
+/// A plugin's settings: the `v=` of its `<SET>` entries. An entry the
+/// element lacks is added when the package names the parameter.
+fn write_plugin_params(
+    doc: &mut LoxoneDoc,
+    module: &Module,
+    uuid: &str,
+    o: &crate::logic::ast::OwnedDecl,
+) -> Result<()> {
+    let fail = |m: String| Err(Error::Compile(m));
+    let Some(el) = find_c_mut(&mut doc.xml.root, uuid) else {
+        return Ok(());
+    };
+    let gid = el.attr("gid").unwrap_or_default().to_string();
+    let kind = crate::plugins::kind(&gid);
+    for (key, v) in &o.settings {
+        let v = match v {
+            Value::Ref(n) => module.lets().find(|l| l.name == *n).map_or(v, |l| &l.value),
+            _ => v,
+        };
+        if !el.child_elements().any(|c| c.name == "SET") {
+            let mut s = Element::new("SET");
+            s.self_closing = false;
+            el.children.insert(0, crate::xml::Node::Element(s));
+        }
+        let set = el
+            .child_elements_mut()
+            .find(|c| c.name == "SET")
+            .expect("inserted");
+        let held = set
+            .child_elements()
+            .position(|c| crate::plugins::source_key(&c.name) == *key);
+        let param = kind.and_then(|k| k.param(key));
+        let entry = match (held, param) {
+            (Some(i), _) => set.child_elements_mut().nth(i).expect("found"),
+            (None, Some(p)) => {
+                let mut c = Element::new(p.id);
+                c.set_attr("t", &p.t.to_string());
+                set.push_child(c);
+                set.child_elements_mut().last().expect("pushed")
+            }
+            (None, None) => {
+                let has: Vec<String> = match kind {
+                    Some(k) => k.keys(),
+                    None => set
+                        .child_elements()
+                        .map(|c| crate::plugins::source_key(&c.name))
+                        .collect(),
+                };
+                return fail(format!(
+                    "`{}`: the {} plugin ({uuid}) has no setting `{key}`. It has {}.",
+                    o.slug,
+                    kind.map_or(gid.as_str(), |k| k.name),
+                    if has.is_empty() {
+                        "none".to_string()
+                    } else {
+                        has.join(", ")
+                    }
+                ));
+            }
+        };
+        let t = entry.attr("t").unwrap_or("11").to_string();
+        match crate::plugins::encode(&t, v) {
+            Ok(Some(value)) => entry.set_attr("v", &value),
+            Ok(None) => {
+                entry.remove_attr("v");
+            }
+            Err(want) => {
+                return fail(format!("`{}`: `{key}:` takes {want}.", o.slug));
+            }
+        }
     }
     Ok(())
 }

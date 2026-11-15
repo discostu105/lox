@@ -61,7 +61,10 @@ fn verify(el: &Element, block_type: &str) -> std::result::Result<(), String> {
             spec.len()
         ));
     }
-    if !crate::connectors::VERIFIED_BLOCK_VERSIONS.contains(&el.attr("V").unwrap_or("")) {
+    // A room or category keeps the version it was saved at (taxonomy).
+    if !crate::logic::taxonomy::TYPES.contains(&block_type)
+        && !crate::connectors::VERIFIED_BLOCK_VERSIONS.contains(&el.attr("V").unwrap_or(""))
+    {
         return Err(format!(
             "block version V=\"{}\" is not one this version of Lox Logic is verified for",
             el.attr("V").unwrap_or("")
@@ -461,6 +464,7 @@ pub(super) fn adopt_device(
                 page_uuid: None,
                 expr_owned: false,
                 states: Vec::new(),
+                companions: Vec::new(),
                 gui_defaults: false,
             },
         );

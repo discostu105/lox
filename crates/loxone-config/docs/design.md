@@ -252,3 +252,6 @@ decision, so `grep -r D42` finds it. A new decision takes the next number and a 
 | D133 | [Externs take bindings, expressions wrap and compute, `page` is a file header](decisions/0133-extern-bindings-expressions-page-header.md) | accepted (language v3, part two) |
 | D134 | [Templates are block types](decisions/0134-templates-as-block-types.md) | accepted (language v3, part three) |
 | D135 | [The project's and the Miniserver's settings from source](decisions/0135-project-and-miniserver-settings.md) | accepted, extends [D65](decisions/0065-physical-io-settings.md) |
+| D136 | [Rooms and categories from source](decisions/0136-rooms-and-categories.md) | accepted, reverses a non-goal of [vision.md](vision.md) (#324) |
+| D137 | [Plugins in the Network Periphery](decisions/0137-plugins.md) | accepted, extends [D102](decisions/0102-created-tree-devices.md) |
+| D138 | [Hardware declarations carry a fan-in and a tiles claim](decisions/0138-declarations-carry-fan-in-and-tiles.md) | accepted, extends [D101](decisions/0101-hardware-declarations.md) and [D41](decisions/0041-touch-pure-flex-tiles.md) |

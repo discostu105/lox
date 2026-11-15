@@ -41,7 +41,11 @@ leaves the source.
 
 - A push can switch the automatic updates off. `"never"` also switches Remote Connect off, so the
   language reference says so where it lists the value.
-- `adopt` does not write these claims yet: the source states them by hand.
+- `adopt --uuid` on either object writes its claims: the extern (unless the module has it already)
+  and one line per setting the config holds, with the value it holds, so the next compile changes
+  nothing. Settings the module claims already keep their lines. A setting a save has not written
+  (`SL=` before an altitude is set, `AUM=` in a 17.2 save that does not update automatically) is
+  left out. The claims go into `miniserver.loxl` of a module directory.
 
 ## Evidence
 

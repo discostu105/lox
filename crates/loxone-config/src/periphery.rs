@@ -150,6 +150,45 @@ pub const PERIPHERY: &[PeripheryType] = &[
         ],
         mint_children: &[],
     },
+    // A room (#324): an object of the "Räume" folder, what `Pr=` names.
+    // A fresh one is what Loxone Config 17.3 writes for "Create room"
+    // (oracle session 95): the location pin, room type 2 (Common Room)
+    // unless bound, and `RGR=`, its permission group, written by
+    // `taxonomy::mint_companions` with the folder's sort node.
+    PeripheryType {
+        block_type: "Place",
+        home: Home::Folder("PlaceCaption"),
+        ports: &[],
+        iname: None,
+        settings: &["Rating", "UseFav", "PType"],
+        required: &[],
+        mint_attrs: &[
+            ("WF", Some("16384")),
+            ("Icon", Some(crate::logic::taxonomy::ROOM_ICON)),
+            ("Rating", None),
+            ("UseFav", None),
+            ("PType", Some("2")),
+        ],
+        mint_children: &[],
+    },
+    // A category (#324): what `Cr=` names. A fresh one gets the binders
+    // icon of "Create category" and a permission group like a room's.
+    PeripheryType {
+        block_type: "Category",
+        home: Home::Folder("CategoryCaption"),
+        ports: &[],
+        iname: None,
+        settings: &["Rating", "UseFav"],
+        required: &[],
+        mint_attrs: &[
+            ("WF", Some("16384")),
+            ("Icon", Some(crate::logic::taxonomy::CATEGORY_ICON)),
+            ("Rating", None),
+            ("UseFav", None),
+            ("PType", Some("2")),
+        ],
+        mint_children: &[],
+    },
     // A user-defined operating mode. Its `Mode=` number is minted
     // by the compiler: one below the lowest in the document (the GUI
     // numbers user-defined modes -1, -2, … in creation order).

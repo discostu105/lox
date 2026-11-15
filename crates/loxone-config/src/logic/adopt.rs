@@ -179,6 +179,10 @@ fn adopt_one_expanded(
              monitor's own meter). Adopt that block instead."
         )));
     }
+    if crate::settings::SYSTEM_TYPES.contains(&o.block_type.as_str()) {
+        check_slug(slug).map_err(fail)?;
+        return super::adopt_system::adopt_system(doc, o, &ident, slug, module, lock);
+    }
     if builtin(&o.block_type).is_none() && !crate::hardware::is_hardware(&o.block_type) {
         return Err(fail(format!(
             "cannot adopt {ident}: `{}` is not a type loxl can manage yet. Keep it as an extern.",
@@ -223,16 +227,7 @@ fn adopt_one_expanded(
             doc.config_version().as_deref().unwrap_or("(none)")
         )));
     }
-    let valid = matches!(slug.as_bytes().first(), Some(b) if b.is_ascii_lowercase())
-        && slug
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
-        && !RESERVED.contains(&slug);
-    if !valid {
-        return Err(fail(format!(
-            "`{slug}` is not a valid slug ([a-z][a-z0-9_]*, no statement keyword)"
-        )));
-    }
+    check_slug(slug).map_err(fail)?;
     let mut taken: BTreeSet<String> = module
         .externs()
         .map(|e| e.slug.clone())
@@ -597,6 +592,7 @@ fn adopt_one_expanded(
             page_uuid: Some(lift.page_uuids[page].clone()),
             expr_owned: false,
             states: Vec::new(),
+            companions: Vec::new(),
             gui_defaults: false,
         },
     );
@@ -643,18 +639,9 @@ pub(super) fn check_promotable(
             "a template instance sets `{x}`. Move those statements out of the template, then adopt it."
         ));
     }
-    // `.room`/`.category` and a DayTimer's `schedule` claim hold on
-    // a managed block as on an extern, and stay as they are; tiles belong
-    // to a Touch Pure Flex, a device — never a page block.
-    if raw
-        .items
-        .iter()
-        .any(|i| matches!(i, Item::TilesClaim(c) if c.slug == x))
-    {
-        return Err(format!(
-            "`{x}` carries a tiles claim, which stays on externs"
-        ));
-    }
+    // `.room`/`.category`, a DayTimer's `schedule` claim and a Touch Pure
+    // Flex's `.tiles` claim hold on a declaration as on an extern, and stay
+    // as they are.
     let el = doc
         .objects()
         .into_iter()
@@ -726,6 +713,7 @@ fn adopt_lock(doc: &LoxoneDoc, lift: &Lift, refused: Vec<String>) -> (Lockfile, 
                 page_uuid: Some(lift.page_uuids[page].clone()),
                 expr_owned: lift.exprs.absorbed.contains(&i),
                 states: Vec::new(),
+                companions: Vec::new(),
                 gui_defaults: false,
             },
         );
@@ -1037,4 +1025,20 @@ fn adopt_rule(
         promoted: promoted.into_iter().collect(),
         on_page: true,
     })
+}
+
+/// `Err(why)` unless `slug` is a valid slug for a new declaration.
+fn check_slug(slug: &str) -> std::result::Result<(), String> {
+    let valid = matches!(slug.as_bytes().first(), Some(b) if b.is_ascii_lowercase())
+        && slug
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        && !RESERVED.contains(&slug);
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "`{slug}` is not a valid slug ([a-z][a-z0-9_]*, no statement keyword)"
+        ))
+    }
 }

@@ -576,6 +576,31 @@ impl Module {
         if let Value::Unit { .. } = a.value {
             return compile_err(format!("`{a}`: a {} is text, not a unit value", a.attr));
         }
+        // A room or category by its name: a declared or extern `Place`
+        // (`Category`).
+        if let (Attr::Room | Attr::Category, Value::Ref(name)) = (a.attr, &a.value)
+            && matches!(
+                names.get(name.as_str()),
+                Some(NameKind::Block | NameKind::Extern)
+            )
+        {
+            let want = if a.attr == Attr::Room {
+                "Place"
+            } else {
+                "Category"
+            };
+            let ty = self
+                .externs()
+                .find(|e| e.slug == *name)
+                .map_or_else(|| self.block_type_of(name), |e| e.block_type.as_str());
+            if ty != want {
+                return compile_err(format!(
+                    "`{a}`: `{name}` is a {ty}, not a {} (a {want})",
+                    a.attr
+                ));
+            }
+            return Ok(());
+        }
         self.value_refs(names, &a.value)?;
         Ok(())
     }
@@ -850,7 +875,14 @@ impl Module {
         seen: &mut Seen<'a>,
     ) -> Result<()> {
         let tiles_claimed = &mut seen.tiles_claimed;
+        // A hardware declaration is an extern of its device, too.
+        let declared = |slug: &str| {
+            self.blocks()
+                .find(|b| b.slug == slug)
+                .is_some_and(|b| b.block_type == "TreeDevice")
+        };
         match names.get(c.slug.as_str()) {
+            Some(NameKind::Block) if declared(&c.slug) => {}
             Some(NameKind::Extern) => {
                 let ty = self
                     .externs()
@@ -866,8 +898,9 @@ impl Module {
             }
             Some(kind) => {
                 return compile_err(format!(
-                    "`{c}`: `{}` is {}. Tiles are claimed on an extern \
-                                 Touch Pure Flex (`extern {} = TreeDevice(uuid: \"…\")`)",
+                    "`{c}`: `{}` is {}. Tiles are claimed on a Touch Pure \
+                                 Flex, an extern (`extern {} = TreeDevice(uuid: \"…\")`) \
+                                 or a `TreeDevice` declaration",
                     c.slug,
                     kind.describe(),
                     c.slug

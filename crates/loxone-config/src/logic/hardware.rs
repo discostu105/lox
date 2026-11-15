@@ -17,7 +17,10 @@ use crate::logic::ast::{
 
 /// Whether `key` names an owned setting of `block_type` in a declaration.
 pub(crate) fn is_owned_setting(block_type: &str, key: &str) -> bool {
-    crate::settings::setting(block_type, key).is_some()
+    // A plugin's parameters depend on its package: checked against it
+    // where the package is known.
+    block_type == "Plugin"
+        || crate::settings::setting(block_type, key).is_some()
         || (key == STATISTICS && stats_value(block_type).is_some())
 }
 
@@ -25,7 +28,7 @@ pub(crate) fn is_owned_setting(block_type: &str, key: &str) -> bool {
 pub(crate) fn is_identity(key: &str) -> bool {
     matches!(
         key,
-        "serial" | "uuid" | "iname" | "device" | "kind" | "tree" | "branch"
+        "serial" | "uuid" | "iname" | "device" | "kind" | "tree" | "branch" | "gid"
     )
 }
 
@@ -47,6 +50,8 @@ struct Identity {
     kind: Option<String>,
     tree: Option<String>,
     branch: Option<String>,
+    /// A plugin to create: its package.
+    gid: Option<String>,
 }
 
 fn identity(b: &BlockDecl) -> Result<Identity> {
@@ -59,17 +64,22 @@ fn identity(b: &BlockDecl) -> Result<Identity> {
         kind: None,
         tree: None,
         branch: None,
+        gid: None,
     };
     for bind in b.bindings().filter(|x| is_identity(&x.port)) {
         let key = bind.port.as_str();
+        let plugin = b.block_type == "Plugin";
         let allowed = match key {
-            "serial" => is_device(&b.block_type),
+            "gid" => plugin,
+            "serial" => is_device(&b.block_type) && !plugin,
             "kind" | "tree" | "branch" => b.block_type == "TreeDevice",
             "iname" | "device" => is_io(&b.block_type),
             _ => true,
         };
         if !allowed {
-            let what = if b.block_type == "TreeDevice" {
+            let what = if plugin {
+                "a plugin takes `uuid:`, or `gid:` to create one"
+            } else if b.block_type == "TreeDevice" {
                 "a Tree device takes `serial:`, `uuid:` or `kind:` with `tree:`"
             } else if is_device(&b.block_type) {
                 "a device takes `serial:` or `uuid:`"
@@ -88,6 +98,7 @@ fn identity(b: &BlockDecl) -> Result<Identity> {
             "kind" => &mut id.kind,
             "tree" => &mut id.tree,
             "branch" => &mut id.branch,
+            "gid" => &mut id.gid,
             _ => &mut id.device,
         };
         let value = if key == "device" || key == "tree" {
@@ -211,6 +222,33 @@ fn create_spec(slug: &str, kind: &str, id: &Identity) -> Result<MatchSpec> {
     })
 }
 
+/// The matcher of a plugin to create, checked against the package table,
+/// and its arguments against the package's parameters.
+fn plugin_spec(b: &BlockDecl, gid: &str) -> Result<MatchSpec> {
+    let Some(k) = crate::plugins::kind(gid).filter(|k| k.creatable) else {
+        return Err(Error::Compile(format!(
+            "`{}`: Lox Logic cannot create a `{gid}` plugin. It creates {}. Add others in \
+             Loxone Config and declare them by `uuid:` (`loxl adopt --uuid …`).",
+            b.slug,
+            crate::plugins::creatable().join(", ")
+        )));
+    };
+    for bind in b.bindings().filter(|x| !is_identity(&x.port)) {
+        if k.param(&bind.port).is_none() {
+            return Err(Error::Compile(format!(
+                "`{}`: the {} plugin has no setting `{}`. It has {}.",
+                b.slug,
+                k.name,
+                bind.port,
+                k.keys().join(", ")
+            )));
+        }
+    }
+    Ok(MatchSpec::Plugin {
+        gid: gid.to_string(),
+    })
+}
+
 fn lower_one(
     b: BlockDecl,
     hw: &BTreeMap<String, (String, Identity)>,
@@ -220,7 +258,19 @@ fn lower_one(
     let fail = |m: String| Err(Error::Compile(m));
     let id = &hw[&b.slug].1;
     let ty = b.block_type.as_str();
-    let (match_spec, device_serial) = if is_device(ty) {
+    let (match_spec, device_serial) = if ty == "Plugin" {
+        match (&id.uuid, &id.gid) {
+            (Some(u), None) => (MatchSpec::Uuid(u.clone()), None),
+            (None, Some(g)) => (plugin_spec(&b, g)?, None),
+            _ => {
+                return fail(format!(
+                    "`{}`: say which plugin this is with `uuid: \"…\"`, or create one with \
+                     `gid: \"…\"` (the package, e.g. \"McpServer\").",
+                    b.slug
+                ));
+            }
+        }
+    } else if is_device(ty) {
         match (&id.serial, &id.uuid, &id.kind) {
             (Some(s), None, None) => (MatchSpec::Serial(s.clone()), None),
             (None, Some(u), None) => (MatchSpec::Uuid(u.clone()), None),
@@ -303,13 +353,18 @@ fn lower_one(
         close_comment: None,
     })];
     let mut settings: Vec<(String, Value)> = Vec::new();
-    let mut seen = std::collections::BTreeSet::new();
+    // A port takes several sources (a fan-in, `I: [a.Q, b.Q]`, as Loxone
+    // Config ORs them); a value it takes once.
+    let mut seen: BTreeMap<&str, bool> = BTreeMap::new();
     for bind in b.bindings() {
         let key = bind.port.as_str();
         if is_identity(key) {
             continue;
         }
-        if !seen.insert(key) {
+        let source = !matches!(bind.kind, BindingKind::Param(_));
+        if let Some(was_source) = seen.insert(key, source)
+            && !(source && was_source)
+        {
             return fail(format!("`{}` binds `{key}` twice. Keep one.", b.slug));
         }
         let at = PortRef {

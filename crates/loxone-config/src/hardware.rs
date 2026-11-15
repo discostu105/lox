@@ -24,6 +24,9 @@ const DEVICES: &[(&str, &[&str])] = &[
     // The Tree and Air extensions: their devices are declared on their own.
     ("LoxTree", &[]),
     ("LoxAIR", &[]),
+    // A Network Periphery plugin ([`crate::plugins`]): matched by `uuid:`
+    // or created by `gid:`, its settings the package's parameters.
+    ("Plugin", &[]),
 ];
 
 /// Whether a declaration of this type takes over a hardware device.

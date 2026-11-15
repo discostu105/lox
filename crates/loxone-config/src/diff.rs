@@ -31,6 +31,9 @@ fn diff_attrs(block_type: &str) -> impl Iterator<Item = &'static str> {
 fn diff_attrs_v(block_type: &str, version: u8) -> impl Iterator<Item = &'static str> {
     let params: Vec<&'static str> = if (version < 8
         && crate::periphery::periphery(block_type).is_some())
+        // A room's or category's app settings (`Rating`, `UseFav`,
+        // `PType`, #324) joined in v16.
+        || (version < 16 && crate::logic::taxonomy::TYPES.contains(&block_type))
         // A PulseAt's fire time (`At:` → `Sec=`, #248) joined in v10.
         || (version < 10 && !clock_params(block_type).is_empty())
     {
@@ -93,7 +96,7 @@ fn since_v13(block_type: &str, _param: &str) -> bool {
     block_type == "EFM"
 }
 
-const FINGERPRINT_VERSION: u8 = 14;
+const FINGERPRINT_VERSION: u8 = 16;
 
 /// One compared attribute of an object: its own, or `Unit` on its
 /// `<Display>` for a physical input or output.
@@ -290,6 +293,27 @@ fn message_fields(doc: &LoxoneDoc, o: &ObjectSummary) -> BTreeMap<String, String
                         format!("message {}", a.name),
                         crate::xml::unescape(&a.value).into_owned(),
                     )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A plugin's parameters (`<SET>`), keyed `param <id>`; joined in v15.
+/// A save drops `v="false"` and an empty `v=`, so neither differs from
+/// no value.
+fn plugin_params(doc: &LoxoneDoc, o: &ObjectSummary) -> BTreeMap<String, String> {
+    if o.block_type != "Plugin" {
+        return BTreeMap::new();
+    }
+    doc.element_at(&o.path)
+        .and_then(crate::plugins::set_of)
+        .map(|set| {
+            set.child_elements()
+                .map(|p| {
+                    let v = p.attr_decoded("v").map(|v| v.into_owned());
+                    let v = v.filter(|v| !v.is_empty() && v != "false");
+                    (format!("param {}", p.name), v.unwrap_or_default())
                 })
                 .collect()
         })
@@ -568,6 +592,20 @@ pub fn diff(a: &LoxoneDoc, b: &LoxoneDoc) -> DocDiff {
                         to,
                     });
                 }
+                // A plugin's parameters.
+                let (pa, pb) = (plugin_params(a, oa), plugin_params(b, ob));
+                for key in pa.keys().chain(pb.keys()).collect::<BTreeSet<_>>() {
+                    let (from, to) = (pa.get(key), pb.get(key));
+                    if from.map_or("", String::as_str) != to.map_or("", String::as_str) {
+                        out.param_changes.push(ParamChange {
+                            object_uuid: uuid.clone(),
+                            block_type: ob.block_type.clone(),
+                            port_key: key.clone(),
+                            from: from.cloned(),
+                            to: to.cloned(),
+                        });
+                    }
+                }
                 for name in diff_attrs(&ob.block_type) {
                     let (va, vb) = (setting_value(a, oa, name), setting_value(b, ob, name));
                     if canonical_attr(name, &va) != canonical_attr(name, &vb) {
@@ -619,7 +657,25 @@ pub fn semantic_fingerprint(doc: &LoxoneDoc) -> String {
     fingerprint(doc, FINGERPRINT_VERSION)
 }
 
-/// Fingerprint version 13: the current version without the project's and
+/// Fingerprint version 15: the current version without the rooms' and
+/// categories' app settings (`Rating`, `UseFav`, `PType`).
+/// `loxl drift` accepts every older version, so an upgrade alone does not
+/// read as drift. The next compile records the current version.
+#[doc(hidden)] // older forms, for drift checks against old locks
+pub fn semantic_fingerprint_v15(doc: &LoxoneDoc) -> String {
+    fingerprint(doc, 15)
+}
+
+/// Fingerprint version 14: version 15 without the plugins'
+/// parameters (`<SET>`).
+/// `loxl drift` accepts every older version, so an upgrade alone does not
+/// read as drift. The next compile records the current version.
+#[doc(hidden)] // older forms, for drift checks against old locks
+pub fn semantic_fingerprint_v14(doc: &LoxoneDoc) -> String {
+    fingerprint(doc, 14)
+}
+
+/// Fingerprint version 13: version 14 without the project's and
 /// the Miniserver's settings (`Document`, `LoxLIVE`).
 /// `loxl drift` accepts every older version, so an upgrade alone does not
 /// read as drift. The next compile records the current version.
@@ -809,6 +865,14 @@ fn fingerprint(doc: &LoxoneDoc, version: u8) -> String {
             for (key, v) in crate::moods::mood_fields(doc, o) {
                 field(&mut buf, b'l', &key);
                 field(&mut buf, b'v', &v);
+            }
+        }
+        if version >= 15 {
+            for (key, v) in plugin_params(doc, o) {
+                if !v.is_empty() {
+                    field(&mut buf, b'g', &key);
+                    field(&mut buf, b'v', &v);
+                }
             }
         }
     }

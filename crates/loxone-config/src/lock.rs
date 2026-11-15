@@ -35,10 +35,11 @@ use std::path::Path;
 ///
 /// Older lockfiles load, with the newer maps empty. Saving writes this
 /// version, so an older binary refuses the file instead of silently
-/// dropping state it does not know. A lock without `gui_defaults` on any
-/// object is written as v8, which every binary since v8 reads in full.
+/// dropping state it does not know. A lock without `gui_defaults` or
+/// `companions` on any object is written as v8, which every binary since
+/// v8 reads in full.
 /// The versions are listed in the crate's `docs/lockfile-spec.md`.
-pub const LOCKFILE_VERSION: u32 = 9;
+pub const LOCKFILE_VERSION: u32 = 10;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Lockfile {
@@ -207,6 +208,13 @@ pub struct LockedObject {
     /// its own `SpStates=` is the GUI's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub states: Vec<String>,
+    /// What the compiler minted with a room or category it created
+    /// (#324): the UUID of its permission group (`RGR=`, a `RightGroup`)
+    /// and, for a room, of its node in the "Räume" folder's sort tree
+    /// (`<nd>`). Written while the base lacks them, so a recompile against
+    /// a base from before the deployment mints the same objects.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub companions: Vec<String>,
     /// The compiler created the block with the values Loxone Config gives
     /// a placed block ([`crate::gui_defaults`]): a port the source leaves
     /// out gets its GUI default. Absent on a block created before that, or
@@ -289,11 +297,15 @@ impl Lockfile {
         Ok(())
     }
 
-    /// The version [`Lockfile::save`] writes: v8 unless an object carries
-    /// `gui_defaults`, so a lock without it stays readable by older binaries.
+    /// The version [`Lockfile::save`] writes: the oldest that holds what
+    /// the lock carries (v10 for `companions`, v9 for `gui_defaults`,
+    /// v8 otherwise), so a lock without them stays readable by older
+    /// binaries.
     pub fn written_version(&self) -> u32 {
-        if self.objects.values().any(|o| o.gui_defaults) {
-            LOCKFILE_VERSION
+        if self.objects.values().any(|o| !o.companions.is_empty()) {
+            10
+        } else if self.objects.values().any(|o| o.gui_defaults) {
+            9
         } else {
             8
         }
@@ -410,13 +422,20 @@ mod tests {
                 page_uuid: Some("00000002-0000-0000-ffff504f94112233".into()),
                 expr_owned: false,
                 states: Vec::new(),
+                companions: Vec::new(),
                 gui_defaults: true,
             },
         );
         let json = lock.to_json();
         assert!(json.contains("\"lockfile_version\": 9"), "{json}");
         let back: Lockfile = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, lock);
+        assert_eq!(
+            Lockfile {
+                lockfile_version: LOCKFILE_VERSION,
+                ..back.clone()
+            },
+            lock
+        );
         assert_eq!(back.to_json(), json, "serialization must be stable");
     }
 
@@ -435,12 +454,20 @@ mod tests {
                 page_uuid: None,
                 expr_owned: false,
                 states: Vec::new(),
+                companions: Vec::new(),
                 gui_defaults: true,
             },
         );
         let json = lock.to_json();
         assert!(json.contains("\"lockfile_version\": 9"), "{json}");
         assert!(json.contains("\"gui_defaults\": true"), "{json}");
+
+        // A room's companions need v10.
+        lock.objects.get_mut("m").unwrap().companions = vec!["g".into(), "n".into()];
+        let json = lock.to_json();
+        assert!(json.contains("\"lockfile_version\": 10"), "{json}");
+        let back: Lockfile = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, lock);
     }
 
     #[test]
@@ -501,6 +528,7 @@ mod tests {
                 page_uuid: None,
                 expr_owned: false,
                 states: Vec::new(),
+                companions: Vec::new(),
                 gui_defaults: false,
             },
         );
@@ -536,6 +564,7 @@ mod tests {
                 page_uuid: None,
                 expr_owned: false,
                 states: Vec::new(),
+                companions: Vec::new(),
                 gui_defaults: false,
             },
         );

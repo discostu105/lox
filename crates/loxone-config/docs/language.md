@@ -749,17 +749,25 @@ states. They are written on every compile.
   LoxAIRAsensor). `off` removes it. Left out, the statistics stay as
   Loxone Config set them.
 - **Ports** are bound in the argument list (`I: klingel.Q`, `I: 30`).
-  `x.Port <- …`, `x.Port = …` and `x.title = …` on a declaration are
-  errors. `.room` and `.category` are allowed; they only rewrite a
-  binding the element has.
+  An output driven from several places takes a list,
+  `I: [alarm.Silent, brandmelder.PreAlarmSignal]`, which Loxone Config
+  ORs like any fan-in. `x.Port <- …`, `x.Port = …` and `x.title = …` on
+  a declaration are errors. `.room` and `.category` are allowed; they
+  only rewrite a binding the element has. So is a Touch Pure Flex's
+  `.tiles` claim (see *Touch Pure Flex tiles*).
 - **Removing** a declaration from the source releases the hardware: the
   element keeps the values the source wrote last, and its wires from
   the argument list leave. Nothing is deleted, except a device the
   source created (below) under `removed <slug>`.
 - `adopt --uuid <device>` declares the device with every I/O below it,
   with the values the config holds. An extern among them keeps its
-  slug, and its statements move into its declaration. Adopting an I/O
-  alone is an error. Pairing a device stays in Loxone Config.
+  slug, and its statements move into its declaration: several `<-`
+  onto one port become a list. A `.tiles`, `.room` or `.category` claim
+  stays as it is. Adopting an I/O alone is an error. Pairing a device
+  stays in Loxone Config.
+- A `defaults` statement the adopt writes covers only types the module
+  declares nowhere yet, so adopting devices one at a time never puts a
+  `defaults` in front of declarations written without one.
 
 #### Creating a Tree device
 
@@ -791,6 +799,38 @@ the lockfile keeps it. Pair it with a Tree search in Loxone Config.
 - A base without the device, an older one or one where it was deleted
   in Loxone Config, gets it back under the same UUID.
 - No compile deletes any other hardware.
+
+### Plugins — the *Network Periphery*
+
+```text
+mcp = Plugin("MCP Server", gid: "McpServer", custom_local_url: "https://loxone.local/mcp")
+matter = Plugin("Matter", uuid: "1f0e2a4b-0012-ab34-ffff504f94112233",
+                mx_add_roomnames_to_endpoint_names: off)
+```
+
+A plugin (MCP Server, Matter, HomeKit, Exosphere, …) is an object in the
+*Network Periphery* folder. `uuid:` takes over one that Loxone Config made;
+`gid:` (the package, `McpServer` or `Matter`) creates one, and from then on
+the lockfile keeps it.
+
+- **Settings** are the package's parameters, the parameter id with `-`
+  written as `_` (`custom-local-url` → `custom_local_url`). A tick box
+  takes `on`/`off`, a number a number, a time a time of day, everything
+  else a quoted string; `""` clears a text. A name the package does not
+  have is an error that lists the ones it has. A setting the source does
+  not name stays as it is.
+- **How many:** a package that a Miniserver takes once (MCP Server,
+  Matter, HomeKit, Alexa, …) is not created a second time: the error
+  names the one the config holds, to declare by `uuid:` instead.
+- **Creating** works for MCP Server and Matter. Any other package is
+  added in Loxone Config and then declared by `uuid:`.
+- **Installing** the package on the Miniserver is Loxone Config's (or the
+  push's) job; the compile writes only the object.
+- **Deleting** a created plugin takes `removed <slug>`, as for a created
+  Tree device.
+- **`loxl adopt --uuid … --as <slug>`** writes the declaration with the
+  settings the package shows.
+- `.title`, `.room` and `.category` work as on any declaration.
 
 ### Operating modes — minted into the "Betriebsmodi" folder
 
@@ -876,6 +916,40 @@ mode is gone from the config (a deleted user mode) is adopted without
 `switches:`, with a comment that names its `CalType`: it keeps that
 number until `switches:` names a mode. Its `I` and `Q`
 are never wired in the corpus; the mode's `Q` is the output to use.
+
+### Rooms and categories — minted into "Räume" and "Kategorien"
+
+```text
+werkstatt = Place("Werkstatt", PType: 6, Rating: 2, UseFav: on)
+garten = Category("Garten")
+extern kueche = Place(uuid: "1d75ef25-0123-6252-ffffed57184a04d2")
+
+licht.room = werkstatt             # by slug: a declared or extern room
+licht.category = garten
+pumpe.room = "Keller"              # or by title, as before
+```
+
+A room (`Place`) or category (`Category`) is an object of the object tree, like an operating mode: no
+position, no `page`. A new one gets what Loxone Config gives one it creates: the default icon, a
+permission group with its title and, for a room, its place in the room list. It also gets an entry in
+the app catalogue.
+
+| Setting | Values | Default |
+|---|---|---|
+| `PType` (rooms only) | 1 Bedroom, 2 Common Room, 3 Thoroughfare, 4 Central, 5 Other, 6 Outdoor area | 2 |
+| `Rating` | the default rating in the app, in stars | 0 |
+| `UseFav` | `on` / `off`: shown under favourites | `off` |
+
+- **One title per room.** A new room or category may not repeat a title of its kind: the error names
+  the existing one's UUID. Declare that one as an extern, or adopt it.
+- **Rename** with a new label: the permission group follows.
+- **Remove** by deleting the declaration (with `--allow-removals`). The compile refuses while an object
+  in the config still names the room or category; give those another one first.
+- **Existing rooms and categories** are externs, or `adopt --uuid <room> --as <slug>` takes one over
+  with its UUID. Bulk `adopt` leaves them in the config.
+- The icon, the colour, the category group and the area stay with Loxone Config: they are kept, not
+  claimable.
+- A page's `room:` must name a room the config already has: pages are made before rooms are minted.
 
 ### `<-` — wire onto a port
 
@@ -992,6 +1066,9 @@ extensions. Its name is a `.title` claim.
   `Updates` and the switches are added where a save adds them.
 - Anything else on the two objects (the program cycle, the display units, the addresses Loxone Config
   connects to, the identity) is not a setting, and naming one is an error that lists the settings.
+- `loxl adopt <cfg> --uuid <uuid> --as haus --module pages --lock …` on either object writes its
+  settings as they stand: the `extern` line and one claim per setting, into `pages/miniserver.loxl`.
+  Settings the module claims already are kept, and a setting a save has not written yet is left out.
 
 ### `(a, b, …).X = value` — one setting on several objects
 
@@ -1021,10 +1098,11 @@ Claims one attribute of an extern object — typically a device or one of
 its inputs/outputs, which only Loxone Config can create:
 
 - `.title` rewrites the object's `Title=`.
-- `.room` / `.category` name a `Place` / `Category` **by title**; it must
-  exist in the base exactly once (rooms and categories are created in
-  Loxone Config). The compiler writes its UUID into the object's
-  `<IoData Pr=…>` / `Cr=…`.
+- `.room` / `.category` name a `Place` / `Category` by the slug of a
+  declared or extern one, or **by title**: a title must exist exactly once
+  in the base or among the rooms the module declares (see
+  [Rooms and categories](#rooms-and-categories--minted-into-räume-and-kategorien)).
+  The compiler writes its UUID into the object's `<IoData Pr=…>` / `Cr=…`.
 
 The attribute must already exist on the object — Lox Logic rewrites a
 binding, it never adds one (an object without it is refused: set it once
@@ -1554,7 +1632,8 @@ flex_kueche.tiles = kueche
 A `tiles` set names tile programs. A claim `<device>.tiles = <set>` writes them onto one Touch Pure
 Flex; several devices may claim one set.
 
-- The device is an extern `TreeDevice`. Pin it by `uuid:`, since tree device titles are free text.
+- The device is an extern `TreeDevice`, pinned by `uuid:` since tree device titles are free text, or
+  a `TreeDevice` hardware declaration (`flex_kueche = TreeDevice("Flex Küche", serial: "B05DF106")`).
 - A tile is addressed by its index `i` in the config. Lox Logic rewrites the three functions of tiles
   that exist and keeps every unlisted tile unchanged.
 - The layout (which tiles exist, their position, size and icon) stays with Loxone Config.
