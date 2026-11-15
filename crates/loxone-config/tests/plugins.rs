@@ -217,3 +217,36 @@ fn refusals_name_the_fix() {
         err(r#"x = Plugin("X", gid: "McpServer", custom_local_url: on)"#).contains("quoted string")
     );
 }
+
+#[test]
+fn diff_and_drift_see_a_plugin_parameter() {
+    use loxone_config::diff;
+    let a = base();
+    let edited = String::from_utf8(a.to_bytes())
+        .unwrap()
+        .replace("t=\"1\" v=\"true\"", "t=\"1\" v=\"false\"");
+    let b = LoxoneDoc::parse(edited.as_bytes()).unwrap();
+    let d = diff::diff(&a, &b);
+    assert_eq!(d.param_changes.len(), 1, "{d:#?}");
+    assert_eq!(
+        d.param_changes[0].port_key,
+        "param mx_add_roomnames_to_endpoint_names"
+    );
+    assert_ne!(
+        diff::semantic_fingerprint(&a),
+        diff::semantic_fingerprint(&b)
+    );
+    // The form before plugin parameters joined is blind to it.
+    assert_eq!(
+        diff::semantic_fingerprint_v14(&a),
+        diff::semantic_fingerprint_v14(&b)
+    );
+    // `v="false"` as a save drops it: no change.
+    let dropped = edited.replace(" v=\"false\"", "");
+    let c = LoxoneDoc::parse(dropped.as_bytes()).unwrap();
+    assert!(diff::diff(&b, &c).is_empty());
+    assert_eq!(
+        diff::semantic_fingerprint(&b),
+        diff::semantic_fingerprint(&c)
+    );
+}

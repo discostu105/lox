@@ -31,8 +31,9 @@ so enabling MCP Server or Matter, or changing their URLs, happened only in Loxon
 
 - The compile writes the object only. Installing the package on the Miniserver stays with Loxone Config
   or the push.
-- The semantic diff and the drift fingerprint do not compare `<SET>`. A changed plugin setting shows as
-  no change in `loxl diff` and is not drift. Including it needs a fingerprint version of its own.
+- The semantic diff and the drift fingerprint (v15) compare `<SET>`, one change per parameter
+  (`param <id>`). `v="false"` and an empty `v=` read as no value, since a save drops them. A lock with
+  the v14 form still reads as in sync.
 - The first save of a created plugin adds `Desc=` and `NDOC=` from the package in the GUI's language,
   so that save is not a byte no-op. The compile does not write them.
 - A plugin recreated under its locked UUID gets new UUIDs for its online status, as a recreated Tree
