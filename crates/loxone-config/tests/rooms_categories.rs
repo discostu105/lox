@@ -426,3 +426,31 @@ fn the_catalogue_lists_new_rooms_and_categories() {
     assert!(v["cats"].get(cat).is_none(), "{}", up2.text);
     assert_eq!(v["cats"][CAT]["name"], "Beleuchtung");
 }
+
+#[test]
+fn diff_and_drift_see_a_rooms_app_settings() {
+    use loxone_config::diff;
+    let a = base();
+    let b = LoxoneDoc::parse(
+        base_text()
+            .replace("Rating=\"1\" UseFav=\"true\"", "Rating=\"2\"")
+            .as_bytes(),
+    )
+    .unwrap();
+    let d = diff::diff(&a, &b);
+    let keys: Vec<&str> = d
+        .param_changes
+        .iter()
+        .map(|c| c.port_key.as_str())
+        .collect();
+    assert_eq!(keys, ["Rating", "UseFav"], "{d:#?}");
+    assert_ne!(
+        diff::semantic_fingerprint(&a),
+        diff::semantic_fingerprint(&b)
+    );
+    // The form before they joined is blind to them.
+    assert_eq!(
+        diff::semantic_fingerprint_v15(&a),
+        diff::semantic_fingerprint_v15(&b)
+    );
+}

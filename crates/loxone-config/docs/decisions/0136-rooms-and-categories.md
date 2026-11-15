@@ -46,9 +46,9 @@ licht.room = werkstatt
 - **The app catalogue** gets an entry for a new room or category in the shape Loxone Config 17.3
   writes, loses the entry of a removed one, and follows a rename and the settings. An entry it cannot
   write exactly (a custom icon, a colour, a category group) stays as it was until Loxone Config saves.
-- **The drift fingerprint is unchanged.** It already holds the objects and their titles; the room
-  settings are left out of the parameter comparison. Watching them for drift would need a fingerprint
-  version of its own.
+- **The drift fingerprint v16 compares the room settings** (`Rating`, `UseFav`, `PType`), so a
+  rating or favourite changed in Loxone Config shows in `loxl diff` and as drift. A lock with the
+  v15 form still reads as in sync.
 
 ## Consequences
 

@@ -32,9 +32,8 @@ fn diff_attrs_v(block_type: &str, version: u8) -> impl Iterator<Item = &'static 
     let params: Vec<&'static str> = if (version < 8
         && crate::periphery::periphery(block_type).is_some())
         // A room's or category's app settings (`Rating`, `UseFav`,
-        // `PType`, #324) are not compared: joining them would change the
-        // fingerprint of every config with rooms.
-        || crate::logic::taxonomy::TYPES.contains(&block_type)
+        // `PType`, #324) joined in v16.
+        || (version < 16 && crate::logic::taxonomy::TYPES.contains(&block_type))
         // A PulseAt's fire time (`At:` → `Sec=`, #248) joined in v10.
         || (version < 10 && !clock_params(block_type).is_empty())
     {
@@ -97,7 +96,7 @@ fn since_v13(block_type: &str, _param: &str) -> bool {
     block_type == "EFM"
 }
 
-const FINGERPRINT_VERSION: u8 = 15;
+const FINGERPRINT_VERSION: u8 = 16;
 
 /// One compared attribute of an object: its own, or `Unit` on its
 /// `<Display>` for a physical input or output.
@@ -658,7 +657,16 @@ pub fn semantic_fingerprint(doc: &LoxoneDoc) -> String {
     fingerprint(doc, FINGERPRINT_VERSION)
 }
 
-/// Fingerprint version 14: the current version without the plugins'
+/// Fingerprint version 15: the current version without the rooms' and
+/// categories' app settings (`Rating`, `UseFav`, `PType`).
+/// `loxl drift` accepts every older version, so an upgrade alone does not
+/// read as drift. The next compile records the current version.
+#[doc(hidden)] // older forms, for drift checks against old locks
+pub fn semantic_fingerprint_v15(doc: &LoxoneDoc) -> String {
+    fingerprint(doc, 15)
+}
+
+/// Fingerprint version 14: version 15 without the plugins'
 /// parameters (`<SET>`).
 /// `loxl drift` accepts every older version, so an upgrade alone does not
 /// read as drift. The next compile records the current version.

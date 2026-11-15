@@ -103,7 +103,7 @@ fn write_owned(
         write_claimed(doc, uuid, attr, &target);
     }
     if o.block_type == "Plugin" {
-        return write_plugin_params(doc, module, uuid, o);
+        return write_plugin_params(doc, cx.module, uuid, o);
     }
     for (name, v) in &o.settings {
         if name == STATISTICS {
