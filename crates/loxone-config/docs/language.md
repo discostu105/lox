@@ -877,6 +877,40 @@ mode is gone from the config (a deleted user mode) is adopted without
 number until `switches:` names a mode. Its `I` and `Q`
 are never wired in the corpus; the mode's `Q` is the output to use.
 
+### Rooms and categories — minted into "Räume" and "Kategorien"
+
+```text
+werkstatt = Place("Werkstatt", PType: 6, Rating: 2, UseFav: on)
+garten = Category("Garten")
+extern kueche = Place(uuid: "1d75ef25-0123-6252-ffffed57184a04d2")
+
+licht.room = werkstatt             # by slug: a declared or extern room
+licht.category = garten
+pumpe.room = "Keller"              # or by title, as before
+```
+
+A room (`Place`) or category (`Category`) is an object of the object tree, like an operating mode: no
+position, no `page`. A new one gets what Loxone Config gives one it creates: the default icon, a
+permission group with its title and, for a room, its place in the room list. It also gets an entry in
+the app catalogue.
+
+| Setting | Values | Default |
+|---|---|---|
+| `PType` (rooms only) | 1 Bedroom, 2 Common Room, 3 Thoroughfare, 4 Central, 5 Other, 6 Outdoor area | 2 |
+| `Rating` | the default rating in the app, in stars | 0 |
+| `UseFav` | `on` / `off`: shown under favourites | `off` |
+
+- **One title per room.** A new room or category may not repeat a title of its kind: the error names
+  the existing one's UUID. Declare that one as an extern, or adopt it.
+- **Rename** with a new label: the permission group follows.
+- **Remove** by deleting the declaration (with `--allow-removals`). The compile refuses while an object
+  in the config still names the room or category; give those another one first.
+- **Existing rooms and categories** are externs, or `adopt --uuid <room> --as <slug>` takes one over
+  with its UUID. Bulk `adopt` leaves them in the config.
+- The icon, the colour, the category group and the area stay with Loxone Config: they are kept, not
+  claimable.
+- A page's `room:` must name a room the config already has: pages are made before rooms are minted.
+
 ### `<-` — wire onto a port
 
 ```text
@@ -1021,10 +1055,11 @@ Claims one attribute of an extern object — typically a device or one of
 its inputs/outputs, which only Loxone Config can create:
 
 - `.title` rewrites the object's `Title=`.
-- `.room` / `.category` name a `Place` / `Category` **by title**; it must
-  exist in the base exactly once (rooms and categories are created in
-  Loxone Config). The compiler writes its UUID into the object's
-  `<IoData Pr=…>` / `Cr=…`.
+- `.room` / `.category` name a `Place` / `Category` by the slug of a
+  declared or extern one, or **by title**: a title must exist exactly once
+  in the base or among the rooms the module declares (see
+  [Rooms and categories](#rooms-and-categories--minted-into-räume-and-kategorien)).
+  The compiler writes its UUID into the object's `<IoData Pr=…>` / `Cr=…`.
 
 The attribute must already exist on the object — Lox Logic rewrites a
 binding, it never adds one (an object without it is refused: set it once

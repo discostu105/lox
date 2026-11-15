@@ -84,12 +84,27 @@ pub fn update(
             })
             .unwrap_or_default()
     };
-    let (rooms, cats) = (keys_of("rooms"), keys_of("cats"));
-
-    let (was, now) = (Objects::of(live), Objects::of(compiled));
+    let (mut rooms, mut cats) = (keys_of("rooms"), keys_of("cats"));
     let mut edits: Vec<(Range<usize>, String)> = Vec::new();
     let mut applied = Vec::new();
     let mut left = Vec::new();
+    // Rooms and categories first: a control moved into a new room is
+    // carried over once the room is listed.
+    for (section, ty, names) in [
+        ("rooms", "Place", &mut rooms),
+        ("cats", "Category", &mut cats),
+    ] {
+        let mut out = Out {
+            edits: &mut edits,
+            applied: &mut applied,
+            left: &mut left,
+        };
+        for (uuid, name) in taxonomy(body, &top, section, ty, live, compiled, &mut out)? {
+            names.insert(uuid, name);
+        }
+    }
+
+    let (was, now) = (Objects::of(live), Objects::of(compiled));
     let mut listed = BTreeSet::new();
     let mut removed = BTreeSet::new();
 
@@ -423,6 +438,159 @@ fn modes(
         edits.push((close..close, added));
     }
     Ok(())
+}
+
+/// Where [`taxonomy`] writes: the text edits and what they carry over
+/// or leave.
+struct Out<'a> {
+    edits: &'a mut Vec<(Range<usize>, String)>,
+    applied: &'a mut Vec<Change>,
+    left: &'a mut Vec<Change>,
+}
+
+/// Where a compile changes rooms (`section` "rooms", `ty` "Place") or
+/// categories ("cats", "Category"): a new one gets its entry, a renamed
+/// one its name, a deleted one loses its entry. Its rating, favourite flag
+/// and room type follow the source. Returns the entries added (lowercase
+/// UUID, name).
+fn taxonomy(
+    body: &str,
+    top: &[Member],
+    section: &str,
+    ty: &str,
+    live: &LoxoneDoc,
+    compiled: &LoxoneDoc,
+    out: &mut Out<'_>,
+) -> Result<Vec<(String, String)>, String> {
+    let Out {
+        edits,
+        applied,
+        left,
+    } = out;
+    let Some(m) = top.iter().find(|m| m.key == section) else {
+        return Ok(Vec::new());
+    };
+    let (members, close) = object(body, m.value.start)?;
+    let of = |doc: &'_ LoxoneDoc| -> Vec<(String, Element)> {
+        doc.objects()
+            .into_iter()
+            .filter(|o| o.block_type == ty)
+            .filter_map(|o| {
+                Some((
+                    o.uuid.to_ascii_lowercase(),
+                    doc.element_at(&o.path)?.clone(),
+                ))
+            })
+            .collect()
+    };
+    let (was, now) = (of(live), of(compiled));
+    let find = |all: &'_ [(String, Element)], uuid: &str| {
+        all.iter().find(|(u, _)| u == uuid).map(|(_, e)| e.clone())
+    };
+    let what = if ty == "Place" { "room" } else { "category" };
+    let title = |el: &Element| el.attr_decoded("Title").unwrap_or_default().into_owned();
+    let change = |uuid: &str, name: &str, w: String| Change {
+        uuid: uuid.to_string(),
+        name: name.to_string(),
+        what: w,
+    };
+    let mut removed = BTreeSet::new();
+    for (idx, m) in members.iter().enumerate() {
+        let uuid = m.key.to_ascii_lowercase();
+        let (Some(old), new) = (find(&was, &uuid), find(&now, &uuid)) else {
+            continue;
+        };
+        let Some(new) = new else {
+            removed.insert(idx);
+            applied.push(change(&uuid, &title(&old), format!("{what} deleted")));
+            continue;
+        };
+        let (fields, _) = object(body, m.value.start)?;
+        let field = |k: &str| fields.iter().find(|f| f.key == k).map(|f| f.value.clone());
+        let mut set = |key: &str, from: String, to: String, json: String| {
+            if from == to {
+                return;
+            }
+            match field(key) {
+                Some(r) => {
+                    edits.push((r, json));
+                    applied.push(change(
+                        &uuid,
+                        &title(&new),
+                        format!("{what} {key} {from} → {to}"),
+                    ));
+                }
+                None => left.push(change(
+                    &uuid,
+                    &title(&new),
+                    format!("{what} {key} {from} → {to}"),
+                )),
+            }
+        };
+        set("name", title(&old), title(&new), json_str(&title(&new)));
+        let rating = |el: &Element| el.attr("Rating").unwrap_or("0").to_string();
+        set("defaultRating", rating(&old), rating(&new), rating(&new));
+        let fav = |el: &Element| (el.attr("UseFav") == Some("true")).to_string();
+        set("isFavorite", fav(&old), fav(&new), fav(&new));
+        if ty == "Place" {
+            let kind = |el: &Element| el.attr("PType").unwrap_or("0").to_string();
+            set("type", kind(&old), kind(&new), kind(&new));
+        }
+    }
+    edits.extend(removal_spans(&members, &removed).map(|r| (r, String::new())));
+    let listed: BTreeSet<String> = members.iter().map(|m| m.key.to_ascii_lowercase()).collect();
+    let mut added = String::new();
+    let mut names = Vec::new();
+    for (uuid, el) in &now {
+        if listed.contains(uuid) || find(&was, uuid).is_some() {
+            continue;
+        }
+        let name = title(el);
+        let Some(json) = taxonomy_entry(el) else {
+            left.push(change(uuid, &name, format!("{what} not added: its icon")));
+            continue;
+        };
+        if !added.is_empty() || removed.len() < members.len() {
+            added.push(',');
+        }
+        added.push_str(&json_str(el.attr("U").unwrap_or(uuid)));
+        added.push(':');
+        added.push_str(&json);
+        applied.push(change(uuid, &name, format!("{what} added to the app")));
+        names.push((uuid.clone(), name));
+    }
+    if !added.is_empty() {
+        edits.push((close..close, added));
+    }
+    Ok(names)
+}
+
+/// The catalogue entry of a room or category Lox Logic creates, as Loxone
+/// Config 17.3 writes it (the house's catalogue, oracle session 95): only
+/// for the icon and colour a fresh one has; another is left to a save.
+fn taxonomy_entry(el: &Element) -> Option<String> {
+    let room = el.attr("Type") == Some("Place");
+    let image = match (room, el.attr("Icon")?) {
+        (true, crate::logic::taxonomy::ROOM_ICON) => "IconsFilled/location-pin.svg",
+        (false, crate::logic::taxonomy::CATEGORY_ICON) => "IconsFilled/binders.svg",
+        _ => return None,
+    };
+    if el.attr("BkColor").is_some() || el.attr("CatGroup").is_some() {
+        return None;
+    }
+    let kind = if room {
+        el.attr("PType").unwrap_or("2").to_string()
+    } else {
+        json_str("undefined")
+    };
+    Some(format!(
+        "{{\"uuid\":{},\"name\":{},\"image\":{},\"defaultRating\":{},\"isFavorite\":{},\"type\":{kind},\"color\":\"#8DFF70\"}}",
+        json_str(el.attr("U")?),
+        json_str(&el.attr_decoded("Title").unwrap_or_default()),
+        json_str(image),
+        el.attr("Rating").unwrap_or("0"),
+        el.attr("UseFav") == Some("true"),
+    ))
 }
 
 /// A control key without its `U:` prefix (Loxone Config 16 writes the

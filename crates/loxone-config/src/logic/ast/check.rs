@@ -576,6 +576,31 @@ impl Module {
         if let Value::Unit { .. } = a.value {
             return compile_err(format!("`{a}`: a {} is text, not a unit value", a.attr));
         }
+        // A room or category by its name: a declared or extern `Place`
+        // (`Category`).
+        if let (Attr::Room | Attr::Category, Value::Ref(name)) = (a.attr, &a.value)
+            && matches!(
+                names.get(name.as_str()),
+                Some(NameKind::Block | NameKind::Extern)
+            )
+        {
+            let want = if a.attr == Attr::Room {
+                "Place"
+            } else {
+                "Category"
+            };
+            let ty = self
+                .externs()
+                .find(|e| e.slug == *name)
+                .map_or_else(|| self.block_type_of(name), |e| e.block_type.as_str());
+            if ty != want {
+                return compile_err(format!(
+                    "`{a}`: `{name}` is a {ty}, not a {} (a {want})",
+                    a.attr
+                ));
+            }
+            return Ok(());
+        }
         self.value_refs(names, &a.value)?;
         Ok(())
     }

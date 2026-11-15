@@ -54,7 +54,7 @@ pub(super) fn apply_owned(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuild
                 o.slug, o.block_type
             )));
         }
-        write_owned(doc, module, uuid, o)?;
+        write_owned(doc, cx, uuid, o)?;
         // A claim withdrawn in favor of the declaration leaves no
         // tombstone: the declaration's value stands.
         if let Some(m) = lock.removed_attrs.get_mut(uuid) {
@@ -76,7 +76,7 @@ pub(super) fn apply_owned(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuild
 
 fn write_owned(
     doc: &mut LoxoneDoc,
-    module: &Module,
+    cx: &Rebuild,
     uuid: &str,
     o: &crate::logic::ast::OwnedDecl,
 ) -> Result<()> {
@@ -94,13 +94,9 @@ fn write_owned(
             write_claimed(doc, &r, Attr::Title, t);
         }
     }
-    for (attr, value, ty) in [
-        (Attr::Room, &o.room, "Place"),
-        (Attr::Category, &o.category, "Category"),
-    ] {
+    for (attr, value) in [(Attr::Room, &o.room), (Attr::Category, &o.category)] {
         let Some(v) = value else { continue };
-        let title = module.resolve_value(v)?.to_string();
-        let target = taxonomy_uuid(doc, ty, attr.name(), &title)?;
+        let target = taxonomy_target(doc, cx, attr, v)?;
         if read_claimed(doc, uuid, attr).is_none() {
             return Err(missing(claim_slot(attr)));
         }
@@ -123,7 +119,8 @@ fn write_owned(
             continue;
         }
         let addable = crate::settings::setting(&o.block_type, name).expect("lowering checked");
-        let value = module
+        let value = cx
+            .module
             .resolve_value_for(v, &o.block_type, &o.slug, name)?
             .into_owned();
         if read_setting(doc, uuid, name).is_none() && !addable {

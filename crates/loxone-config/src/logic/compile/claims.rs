@@ -254,14 +254,13 @@ pub(super) fn apply_claims(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuil
     // block on every compile, no lock state — the block is the source's.
     let mut managed_claims: BTreeMap<String, (Option<String>, Option<String>)> = BTreeMap::new();
     for a in module.attrs().filter(|a| managed.contains_key(&a.slug)) {
-        let value = resolve(&a.value)?;
         let entry = managed_claims
             .entry(managed[&a.slug].uuid.clone())
             .or_default();
         match a.attr {
-            Attr::Room => entry.0 = Some(taxonomy_uuid(doc, "Place", "room", &value)?),
+            Attr::Room => entry.0 = Some(taxonomy_target(doc, cx, Attr::Room, &a.value)?),
             Attr::Category => {
-                entry.1 = Some(taxonomy_uuid(doc, "Category", "category", &value)?);
+                entry.1 = Some(taxonomy_target(doc, cx, Attr::Category, &a.value)?);
             }
             Attr::Title => unreachable!("validate refuses a managed block's `.title`"),
         }
@@ -285,11 +284,9 @@ pub(super) fn apply_claims(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuil
     let mut planned_claims: Vec<(String, Attr, AttrClaim)> = Vec::new();
     for a in module.attrs().filter(|a| !managed.contains_key(&a.slug)) {
         let uuid = extern_uuid[&a.slug].clone();
-        let value = resolve(&a.value)?;
         let written = match a.attr {
-            Attr::Title => value,
-            Attr::Room => taxonomy_uuid(doc, "Place", "room", &value)?,
-            Attr::Category => taxonomy_uuid(doc, "Category", "category", &value)?,
+            Attr::Title => resolve(&a.value)?,
+            Attr::Room | Attr::Category => taxonomy_target(doc, cx, a.attr, &a.value)?,
         };
         let original = read_claimed(doc, &uuid, a.attr).ok_or_else(|| {
             Error::Compile(format!(

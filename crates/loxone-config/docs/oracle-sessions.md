@@ -1215,6 +1215,25 @@ parameters, inputs wired from virtual inputs, and every output wired into a `For
   order and UUIDs, and an empty semantic diff. A recompile onto the saved file was byte-identical, and so was
   a compile of the module `loxl adopt` made from it.
 
+## Rooms and categories (session 95, D136) — passed, one finding
+
+Ran 2026-11-15 with Loxone Config 17.3.11.12 on a private prefix and display, offline, on copies of a
+library config saved once by 17.3. Four runs:
+
+1. **Created in the GUI:** a room (*Create room*, type *Outdoor area*) and a category, then a rename,
+   each saved to its own copy. The shapes, the permission groups and the sort node are in
+   [loxone-format.md](loxone-format.md) (*Creating a room or category*).
+2. **A minimal room and category** (only `U` and `Title`) loaded and saved: the load fills in a null
+   icon, `PType="2"`, and for the room a group and a node.
+3. **The full shape** written by hand (room, node, group, category) saved byte for byte.
+4. **A compile** declaring a room and a category with settings, against the 17.3 copy: the save changed
+   nothing but the known second-save noise of 17.3 (`WF` on panels and permissions, `OutputRef`
+   order) and `NumO=`.
+
+- A real catalogue (`LoxAPP3.json` from a 17.3 Miniserver) gave the shape of the `rooms` and `cats` entries.
+- **Finding — Ctrl+S did not save** in this run (the file stayed unchanged for a minute); a click on the
+  toolbar's save icon did. The harness's keyboard save is not reliable on 17.3.
+
 ## Project and Miniserver settings (session 94, D135) — passed
 
 Ran 2026-11-15 with Loxone Config 17.3.11.12 on a private prefix and display, offline. The base was

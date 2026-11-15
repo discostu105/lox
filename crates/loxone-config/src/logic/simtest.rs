@@ -888,6 +888,7 @@ mod tests {
                     page_uuid: None,
                     expr_owned: false,
                     states: Vec::new(),
+                    companions: Vec::new(),
                     gui_defaults: false,
                 },
             );

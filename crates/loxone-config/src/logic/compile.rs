@@ -343,6 +343,8 @@ fn compile_expanded(
 
     owned::apply_owned(&mut doc, lock, &cx)?;
 
+    super::taxonomy::apply(&mut doc, base, lock)?;
+
     apply_features(&mut doc, base, lock, &mut minter, &cx)?;
 
     place_blocks(&mut doc, lock, &cx);
@@ -594,7 +596,7 @@ fn seeded_minter(lock: &Lockfile, opts: &CompileOptions) -> Minter {
     }
     for o in lock.objects.values() {
         minter.avoid(&o.uuid);
-        for s in &o.states {
+        for s in o.states.iter().chain(&o.companions) {
             minter.avoid(s);
         }
         for p in o.ports.values() {
@@ -1869,6 +1871,39 @@ fn ref_followers(doc: &LoxoneDoc, uuid: &str, stop: &dyn Fn(&str) -> bool) -> Ve
 /// The UUID of the one `Place`/`Category` titled `title` — zero or several
 /// are refused (a room is named by its title; there is nothing else to
 /// pick by).
+/// The room (`Attr::Room`) or category a `.room`/`.category` value names:
+/// a declared or extern room or category by its name (`.room = garage`),
+/// else one by its title.
+fn taxonomy_target(doc: &LoxoneDoc, cx: &Rebuild, attr: Attr, value: &Value) -> Result<String> {
+    let (ty, what) = match attr {
+        Attr::Category => ("Category", "category"),
+        _ => ("Place", "room"),
+    };
+    if let Value::Ref(name) = value {
+        let named = match cx.managed.get(name) {
+            Some(b) => Some((b.uuid.clone(), b.block_type.clone())),
+            None => cx.extern_uuid.get(name).map(|u| {
+                let t = cx
+                    .module
+                    .externs()
+                    .find(|e| e.slug == *name)
+                    .map_or_else(String::new, |e| e.block_type.clone());
+                (u.clone(), t)
+            }),
+        };
+        if let Some((uuid, t)) = named {
+            if t != ty {
+                return Err(Error::Compile(format!(
+                    "`{name}` is a {t}, not a {what} (a {ty})"
+                )));
+            }
+            return Ok(uuid);
+        }
+    }
+    let title = cx.module.resolve_value(value)?;
+    taxonomy_uuid(doc, ty, what, &title)
+}
+
 fn taxonomy_uuid(doc: &LoxoneDoc, ty: &str, what: &str, title: &str) -> Result<String> {
     let all: Vec<_> = doc
         .objects()

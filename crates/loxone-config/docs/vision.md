@@ -65,7 +65,9 @@ it has come.
 
 - Pairing hardware. Air learn mode and the Tree search stay in Loxone Config (#323). Once a device is
   paired, its element, its I/Os and their settings are facts a source file can hold (#317, #320).
-  Rooms, categories and visualization still stay in Loxone Config (#324).
+  Visualization still stays in Loxone Config. Rooms and categories moved to source with
+  [D136](decisions/0136-rooms-and-categories.md) (#324): they are created there, their icons and colours
+  are still set in Loxone Config.
 - Transport. Talking to the Miniserver (FTP, HTTP, credentials) belongs to `lox`. The library stays
   pure: bytes in, bytes out.
 - Simulating what Loxone does not document. `loxl test` simulates the blocks whose behavior Loxone

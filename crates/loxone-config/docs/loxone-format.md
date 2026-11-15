@@ -745,13 +745,54 @@ On managed blocks `IoData` is GUI-owned residue, carried forward unchanged
 Logic reads it for composite matching (`room:` / `category:`). It writes it
 only for an attribute claim (`x.room = "…"` / `x.category = "…"`, [D39](decisions/0039-attribute-claims.md)),
 which rewrites an existing `Pr=`/`Cr=` value in place and never adds the
-attribute or the element.
+attribute or the element. Rooms and categories themselves can be declared since
+[D136](decisions/0136-rooms-and-categories.md).
 
 Devices nest their inputs and outputs as child `<C>` elements, each with
 its own `<IoData Pr=…>`. In the house config 673 of 687 device children
 carry their device's room; the rest were moved individually. Loxone
 Config does not cascade a device's room change to its children (its UI
 strings have no such prompt) — the follower rule of [D39](decisions/0039-attribute-claims.md) is Lox Logic's own.
+
+### Creating a room or category
+
+Oracle session 95 ([D136](decisions/0136-rooms-and-categories.md)) created rooms and categories in Loxone
+Config 17.3.11.12 and read back the save:
+
+```xml
+<C Type="PlaceCaption" V="179" U="…" Title="Räume" WF="16384" u="00000000-…">
+  <nd u="N" t="1" ico="0000015c-00ff-0000-0000000000000000" ctrlUuid="P"/>   <!-- sort node -->
+  <C Type="Place" V="179" U="P" Title="Keller" WF="16384" Icon="0000015c-00ff-0000-0000000000000000" PType="6" RGR="G"/>
+</C>
+<C Type="Category" V="179" U="C" Title="Werkzeug" WF="16384" Icon="00000038-00ff-0000-0000000000000000" PType="2" RGR="H"/>
+<C Type="LoxCaption" … CaptionType="13">   <!-- "Berechtigungsgruppen" -->
+  <C Type="RightGroup" V="179" U="G" Title="Keller" Cl="0,0,0" WF="16384" GT="1" MG=""/>
+  <C Type="RightGroup" V="179" U="H" Title="Werkzeug" Cl="0,0,0" WF="16384" GT="2" MG=""/>
+</C>
+```
+
+- **A permission group per room and category.** `RGR=` names a `RightGroup` in the permission groups
+  folder (`CaptionType="13"`): `GT="1"` for a room, `GT="2"` for a category, no members (`MG=""`). The
+  GUI appends it at the end of the folder. Renaming the room renames the group.
+- **A sort node per room**, none per category. The room folder holds `<nd t="1" ctrlUuid=…>` nodes
+  before its rooms; a new one carries `ico=`. The GUI inserted it in the middle of the list; a save
+  keeps the nodes in the order it finds them, so one appended after the last is as good.
+- **Settings and their order:** `Icon`, `First` (the built-in "not assigned"), `Rating`, `UseFav`,
+  `CatGroup` / `PGroup`, `PType`, `BkColor`, `Sqm`, `RGR`. `Rating=` is the default rating in stars,
+  absent at 0. `UseFav="true"` marks a favourite, absent when off. `PType=` is the room type: 1
+  Bedroom, 2 Common Room, 3 Thoroughfare, 4 Central, 5 Other, 6 Outdoor area. The *Create room* dialog
+  asks for one; a category carries `PType="2"`.
+- **Default icons:** a room `0000015c-00ff-…` (`IconsFilled/location-pin.svg` in the catalogue), a
+  category `00000038-00ff-…` (`IconsFilled/binders.svg`). A new category has no `CatGroup=` ("not
+  assigned"); its catalogue entry has `"type":"undefined"`.
+- **A load fills in what is missing.** A room written with only `U` and `Title` comes back with a null
+  icon, `PType="2"`, a group and a node; a category with a null icon and `PType="2"` but no group. Lox
+  Logic writes the full shape, which a save keeps byte for byte.
+- **The objects keep their version.** The room folders and new rooms are at the folder's `V=` (179 in
+  17.3); a save leaves an existing room's (178 in a 17.2 project) as it is.
+- **The app catalogue** lists rooms under `rooms` and categories under `cats`, keyed by plain UUID:
+  `{"uuid","name","image","defaultRating","isFavorite",["default":true],"type","color":"#8DFF70"}`,
+  with the room type as `type`.
 
 ## Virtual and Modbus devices
 
