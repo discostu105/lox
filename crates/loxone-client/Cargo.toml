@@ -22,8 +22,8 @@ tokio-tungstenite = { version = "0.24", default-features = false, features = ["c
 futures-util = "0.3"
 rustls = { version = "0.23", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 hmac = "0.13"
-sha1 = "0.10"
-sha2 = "0.10"
+sha1 = "0.11"
+sha2 = "0.11"
 hex = "0.4"
 base64 = "0.22"
 rsa = { version = "0.9", features = ["sha2"] }

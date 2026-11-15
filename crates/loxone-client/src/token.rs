@@ -2,7 +2,7 @@
 
 use crate::error::{Result, bail};
 use futures_util::{SinkExt, StreamExt};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use rand::RngCore;
 use rsa::{Pkcs1v15Encrypt, RsaPublicKey, pkcs8::DecodePublicKey};
 use sha1::Sha1 as Sha1Digest;
@@ -99,8 +99,8 @@ impl HashAlg {
 
     fn digest_upper_hex(self, data: &[u8]) -> String {
         match self {
-            Self::Sha1 => format!("{:X}", Sha1Digest::digest(data)),
-            Self::Sha256 => format!("{:X}", Sha256::digest(data)),
+            Self::Sha1 => hex::encode_upper(Sha1Digest::digest(data)),
+            Self::Sha256 => hex::encode_upper(Sha256::digest(data)),
         }
     }
 
