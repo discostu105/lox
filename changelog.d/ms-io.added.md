@@ -1,1 +1,0 @@
-- **Miniserver and extension I/O as hardware declarations**: the Miniserver's own relay outputs, digital inputs and overtemperature shutdown, Relay and DI Extensions, Intercoms, and the API connectors and overtemperature shutdowns of Tree and Air devices can be declared in source. `loxl adopt --uuid` takes such an I/O alone once its device is declared
