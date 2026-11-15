@@ -206,6 +206,13 @@ fn otlp_signal_url(endpoint: &str, signal_path: &str) -> String {
     }
 }
 
+/// The exporters' HTTP client (reqwest 0.13) takes TLS from rustls without a
+/// built-in crypto provider: install ring, as the Miniserver connection does.
+/// A provider installed before stays.
+fn install_tls_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 /// Build an OTLP metric exporter with the given endpoint and headers.
 ///
 /// Uses the async reqwest client so the PeriodicReader's tokio task can
@@ -219,7 +226,10 @@ fn build_metric_exporter(
     let header_map = parse_headers(headers)?;
     let mut builder = MetricExporter::builder()
         .with_http()
-        .with_http_client(reqwest::Client::new())
+        .with_http_client({
+            install_tls_provider();
+            reqwest_otlp::Client::new()
+        })
         .with_protocol(Protocol::HttpBinary)
         .with_endpoint(otlp_metrics_url(endpoint));
     if !header_map.is_empty() {
@@ -236,6 +246,7 @@ fn build_metric_exporter(
 /// Build an OTLP log exporter.
 fn build_log_exporter(endpoint: &str, headers: &[String]) -> Result<LogExporter> {
     let header_map = parse_headers(headers)?;
+    install_tls_provider();
     let mut builder = LogExporter::builder()
         .with_http()
         .with_protocol(Protocol::HttpBinary)
@@ -251,6 +262,7 @@ fn build_log_exporter(endpoint: &str, headers: &[String]) -> Result<LogExporter>
 /// Build an OTLP span exporter for traces.
 fn build_span_exporter(endpoint: &str, headers: &[String]) -> Result<SpanExporter> {
     let header_map = parse_headers(headers)?;
+    install_tls_provider();
     let mut builder = SpanExporter::builder()
         .with_http()
         .with_protocol(Protocol::HttpBinary)
