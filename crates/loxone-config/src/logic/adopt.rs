@@ -638,18 +638,9 @@ pub(super) fn check_promotable(
             "a template instance sets `{x}`. Move those statements out of the template, then adopt it."
         ));
     }
-    // `.room`/`.category` and a DayTimer's `schedule` claim hold on
-    // a managed block as on an extern, and stay as they are; tiles belong
-    // to a Touch Pure Flex, a device — never a page block.
-    if raw
-        .items
-        .iter()
-        .any(|i| matches!(i, Item::TilesClaim(c) if c.slug == x))
-    {
-        return Err(format!(
-            "`{x}` carries a tiles claim, which stays on externs"
-        ));
-    }
+    // `.room`/`.category`, a DayTimer's `schedule` claim and a Touch Pure
+    // Flex's `.tiles` claim hold on a declaration as on an extern, and stay
+    // as they are.
     let el = doc
         .objects()
         .into_iter()

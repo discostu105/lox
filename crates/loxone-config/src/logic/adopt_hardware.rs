@@ -231,8 +231,13 @@ pub(super) fn adopt(
                     }
                     _ => continue,
                 };
-                // A claimed setting holds the config's value now.
-                args.retain(|a| !matches!(a, ArgItem::Binding(b) if b.port == *port));
+                // A claimed setting holds the config's value now. A
+                // second wire onto the port joins the first: a fan-in.
+                let source = !matches!(kind, BindingKind::Param(_));
+                args.retain(|a| {
+                    !matches!(a, ArgItem::Binding(b) if b.port == *port
+                        && !(source && !matches!(b.kind, BindingKind::Param(_))))
+                });
                 args.push(ArgItem::Binding(Binding {
                     port: port.clone(),
                     kind,

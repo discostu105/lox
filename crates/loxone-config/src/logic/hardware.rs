@@ -303,13 +303,18 @@ fn lower_one(
         close_comment: None,
     })];
     let mut settings: Vec<(String, Value)> = Vec::new();
-    let mut seen = std::collections::BTreeSet::new();
+    // A port takes several sources (a fan-in, `I: [a.Q, b.Q]`, as Loxone
+    // Config ORs them); a value it takes once.
+    let mut seen: BTreeMap<&str, bool> = BTreeMap::new();
     for bind in b.bindings() {
         let key = bind.port.as_str();
         if is_identity(key) {
             continue;
         }
-        if !seen.insert(key) {
+        let source = !matches!(bind.kind, BindingKind::Param(_));
+        if let Some(was_source) = seen.insert(key, source)
+            && !(source && was_source)
+        {
             return fail(format!("`{}` binds `{key}` twice. Keep one.", b.slug));
         }
         let at = PortRef {

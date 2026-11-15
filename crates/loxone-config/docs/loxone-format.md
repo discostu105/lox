@@ -385,6 +385,13 @@ Evidence: the house config (all 113 uuid-pinned ref externs resolved,
   actor: a dangling mirror stays dangling. The corpus wires all 154
   `OutputRef.AQ` ports into their actors explicitly. Source: oracle
   session 11.
+- **An actor driven from two pages has two `OutputRef`s**, and its `I`
+  holds both distribution wires (`Nc="2"`). Loxone Config ORs them like
+  any fan-in. Evidence: house config, the 24 Nano IO Air "Akustisches
+  Klick-Signal" outputs, each fed by the burglar alarm's `Silent` and the
+  smoke alarm's `PreAlarmSignal` through one `OutputRef` per page. A
+  hardware declaration states them as a list, `I: [a.Q, b.Q]`
+  ([D138](decisions/0138-declarations-carry-fan-in-and-tiles.md)).
 - **A ref's `Title=` is derived from its target.** Loxone Config
   rewrites it to the mirrored object's title on every save, whatever it
   held: minted refs and the GUI's own alike, visible or not, stale ones

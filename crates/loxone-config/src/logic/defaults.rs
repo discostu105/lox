@@ -210,7 +210,8 @@ pub(crate) fn fit_adopted(items: &mut Vec<Item>, module: &super::ast::Module) ->
         });
     }
     // A new `defaults` would reach every block of its type: only where the
-    // module has none yet (template bodies included).
+    // module has none yet (template bodies included). A hardware
+    // declaration expands into what it owns, so those count as well.
     let Ok(expanded) = module.expand() else {
         return Ok(());
     };
@@ -219,7 +220,8 @@ pub(crate) fn fit_adopted(items: &mut Vec<Item>, module: &super::ast::Module) ->
         .filter_map(|i| match i {
             Item::Block(b)
                 if !existing.contains_key(b.block_type.as_str())
-                    && !expanded.blocks().any(|x| x.block_type == b.block_type) =>
+                    && !expanded.blocks().any(|x| x.block_type == b.block_type)
+                    && !expanded.owned().any(|x| x.block_type == b.block_type) =>
             {
                 Some(b)
             }
@@ -230,4 +232,40 @@ pub(crate) fn fit_adopted(items: &mut Vec<Item>, module: &super::ast::Module) ->
     let lead: Vec<Item> = found.into_iter().map(Item::Defaults).collect();
     items.splice(0..0, lead);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::logic::ast::{Item, Module};
+
+    /// Adopted sensors that agree on `MinTime`.
+    const ADOPTED: &str = r#"
+b = TreeSensor("B", device: t2, iname: "I0", MinTime: 10)
+c = TreeSensor("C", device: t2, iname: "I1", MinTime: 10)
+d = TreeSensor("D", device: t2, iname: "I2", MinTime: 10)
+e = TreeSensor("E", device: t2, iname: "I3", MinTime: 10)
+"#;
+
+    fn fitted(module: &str) -> Vec<Item> {
+        let mut items = Module::parse(ADOPTED).unwrap().items;
+        super::fit_adopted(&mut items, &Module::parse(module).unwrap()).unwrap();
+        items
+    }
+
+    fn has_defaults(items: &[Item]) -> bool {
+        items.iter().any(|i| matches!(i, Item::Defaults(_)))
+    }
+
+    #[test]
+    fn a_declared_type_gets_no_new_defaults() {
+        // Nothing of the type yet: the adopted blocks share a `defaults`.
+        assert!(has_defaults(&fitted("")));
+        // A hardware declaration of the type, written without one: the
+        // adopted blocks spell their values out too.
+        let declared = r#"
+t = TreeDevice("T", serial: "B0A1B2C3")
+a = TreeSensor("A", device: t, iname: "I0", MinTime: 20)
+"#;
+        assert!(!has_defaults(&fitted(declared)));
+    }
 }

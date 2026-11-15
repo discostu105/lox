@@ -210,3 +210,75 @@ fn adopting_a_device_takes_its_ios_and_changes_nothing() {
     let e = adopt_one(&doc, BUTTON, "taste", &empty, &mut lock).unwrap_err();
     assert!(e.to_string().contains("TreeDevice"), "{e}");
 }
+
+/// Two sources into the LED's input: Loxone Config ORs them.
+const FAN_IN: &str = r#"
+taster = TreeDevice("Taster Flur", serial: "B0A1B2C3", Installation: "Wand")
+taste = TreeSensor("Taste", device: taster, iname: "I0")
+temp = TreeAsensor("Temperatur", device: taster, iname: "AI0")
+led = TreeActor("LED", device: taster, iname: "Q0", I: [taste.Q, temp.Q])
+"#;
+
+const LED_I: &str = "00000031-0000-0000-ffff000000000001";
+
+fn into_led(doc: &LoxoneDoc) -> Vec<String> {
+    let mut from: Vec<String> = doc
+        .wires()
+        .into_iter()
+        .filter(|w| w.to_port == LED_I)
+        .map(|w| w.from_port)
+        .collect();
+    from.sort();
+    from
+}
+
+#[test]
+fn a_declared_input_takes_several_sources() {
+    let module = Module::parse(FAN_IN).unwrap();
+    let mut lock = Lockfile::default();
+    let out = compile(&base(), &module, &mut lock, &opts()).unwrap();
+    assert_eq!(
+        into_led(&out),
+        [
+            "00000011-0000-0000-ffff000000000001",
+            "00000022-0000-0000-ffff000000000001"
+        ]
+    );
+    let again = compile(&out, &module, &mut lock, &opts()).unwrap();
+    assert_eq!(out.to_bytes(), again.to_bytes());
+
+    // A value is bound once, and never next to a source.
+    for (twice, want) in [
+        ("I: taste.Q, I: 1", "a wired input ignores its value"),
+        ("I: 1, I: 0", "duplicate parameter `I`"),
+    ] {
+        let e = refusal(&FAN_IN.replace("I: [taste.Q, temp.Q]", twice));
+        assert!(e.contains(want), "{e}");
+    }
+}
+
+#[test]
+fn adopting_a_device_keeps_every_wire_into_an_output() {
+    // The config: the LED driven by the button and the temperature, as
+    // two `<-` onto the extern LED.
+    let externs = format!(
+        "extern taste = TreeSensor(uuid: \"{BUTTON}\")\nextern temp = TreeAsensor(uuid: \"{TEMP}\")\n\
+         extern led = TreeActor(uuid: \"{LED}\")\nled.I <- taste.Q\nled.I <- temp.Q\n"
+    );
+    let module = Module::parse(&externs).unwrap();
+    let mut lock = Lockfile::default();
+    let doc = compile(&base(), &module, &mut lock, &opts()).unwrap();
+    assert_eq!(into_led(&doc).len(), 2);
+
+    let adopted = adopt_one(&doc, DEVICE, "taster", &module, &mut lock).unwrap();
+    let text = Module {
+        items: adopted.items,
+    }
+    .to_text();
+    assert!(text.contains("I: [taste.Q, temp.Q]"), "{text}");
+
+    let module = Module::parse(&text).unwrap();
+    let out = compile(&doc, &module, &mut lock, &opts()).unwrap();
+    assert!(loxone_config::diff::diff(&doc, &out).is_empty());
+    assert_eq!(into_led(&out), into_led(&doc));
+}
