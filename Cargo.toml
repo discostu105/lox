@@ -38,7 +38,7 @@ anyhow = "1"
 
 # The Miniserver client (HTTP, token auth, WebSocket, FTP) is crates/loxone-client
 tokio = { version = "1", features = ["full"] }
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 futures-util = "0.3"
 base64 = "0.23"
