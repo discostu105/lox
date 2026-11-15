@@ -19,7 +19,19 @@ pub(super) fn apply_sets(doc: &mut LoxoneDoc, lock: &mut Lockfile, cx: &Rebuild)
             && let Some(sys) = crate::settings::system_setting(&e.block_type, &s.target.port)
             && let Some(owner) = extern_uuid.get(&s.target.slug)
         {
-            for (name, value) in system_writes(module, s, sys)? {
+            let writes = system_writes(module, s, sys)?;
+            // Automatic in a 17.2 save's form (`AUE="true"`, no `AUM=`) is
+            // automatic already: leave the bytes as they are.
+            if sys.kind == crate::settings::SystemKind::Updates
+                && writes
+                    .iter()
+                    .any(|(n, v)| *n == "AUM" && v.as_deref() == Some("1"))
+                && read_setting(doc, owner, "AUE").as_deref() == Some("true")
+                && read_setting(doc, owner, "AUM").is_none()
+            {
+                continue;
+            }
+            for (name, value) in writes {
                 let original = read_setting(doc, owner, name);
                 if original.is_none() && sys.kind == crate::settings::SystemKind::Text {
                     return Err(Error::Compile(format!(

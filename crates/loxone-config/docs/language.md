@@ -986,6 +986,8 @@ extensions. Its name is a `.title` claim.
 
 - **`Updates = "never"` also switches off Remote Connect and Cloud DNS.** Loxone Config asks before
   it does; the compile does not. Since December 2026, Remote Connect also needs a current version.
+- `"auto"` leaves a project that updates automatically as it is: a Loxone Config 17.2 save writes
+  that as `AUE="true"` without `AUM=`, and a 17.3 save as `AUM="1"`.
 - The text settings are rewritten, never added: every save by Loxone Config 17 writes them. `Altitude`,
   `Updates` and the switches are added where a save adds them.
 - Anything else on the two objects (the program cycle, the display units, the addresses Loxone Config

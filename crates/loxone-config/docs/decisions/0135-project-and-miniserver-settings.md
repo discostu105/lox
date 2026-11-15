@@ -25,7 +25,7 @@ leaves the source.
   the pane's word where it is a code (`Country` → `Ctry=`, `Altitude` → `SL=`, `LoxoneLog` →
   `CrashL=`), as [D95](0095-block-settings.md) names block settings.
 - **Values.** `Updates` takes `"auto"`, `"confirm"` or `"never"` and writes `AUE=` and `AUM=`
-  together. `UpdateTime` takes a time of day and writes minutes after midnight. The switches take
+  together; `"auto"` leaves a 17.2 save's automatic (`AUE="true"`, no `AUM=`) as it is. `UpdateTime` takes a time of day and writes minutes after midnight. The switches take
   `on`/`off` and write what a save writes for each, which for most is no attribute.
 - **Rewritten, not added.** The text settings exist in every 17.x save, so a missing one means an old
   or synthetic project, and the compile refuses it. The settings a save adds when set (`SL=`, the

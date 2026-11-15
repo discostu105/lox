@@ -148,8 +148,13 @@ fn never_updating_drops_the_switch() {
     let doc = element(&out, DOC);
     assert_eq!(doc.attr("AUE"), None);
     assert_eq!(doc.attr("AUM"), Some("0"));
-    // `auto` writes what a 17.3 save writes for it.
+    // `auto` on a 17.2 save's automatic leaves it as it is.
     let out = run("haus.Updates = \"auto\"\n").unwrap();
+    assert!(out.to_bytes() == run("").unwrap().to_bytes());
+    // From another mode, `auto` writes what a 17.3 save writes for it.
+    let never = run("haus.Updates = \"never\"\n").unwrap();
+    let module = Module::parse(&format!("{EXTERNS}haus.Updates = \"auto\"\n")).unwrap();
+    let out = compile(&never, &module, &mut Lockfile::default(), &opts()).unwrap();
     assert_eq!(element(&out, DOC).attr("AUE"), Some("true"));
     assert_eq!(element(&out, DOC).attr("AUM"), Some("1"));
 }
