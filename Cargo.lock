@@ -1752,7 +1752,7 @@ dependencies = [
  "hex",
  "hmac 0.13.0",
  "httpmock",
- "rand 0.8.8",
+ "rand 0.10.3",
  "reqwest 0.12.28",
  "rsa",
  "rustls",
@@ -2586,7 +2586,6 @@ version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e058c7de0b26af77780c769414d6257830bb240f3c38477dbc2c16e5f54d6d4c"
 dependencies = [
- "libc",
  "rand_chacha 0.3.1",
  "rand_core 0.6.4",
 ]
