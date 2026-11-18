@@ -25,7 +25,7 @@ thiserror = "2"
 # Slugs: the base letter of an accented title letter (`ž` → `z`)
 unicode-normalization = { version = "0.1", default-features = false }
 # `archive`: backup ZIPs and the LoxCC codec (Loxone writes deflate only)
-zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
+zip = { version = "9", default-features = false, features = ["deflate"], optional = true }
 lz4_flex = { version = "0.14", default-features = false, features = ["std", "safe-encode", "safe-decode"], optional = true }
 crc32fast = { version = "1", optional = true }
 
